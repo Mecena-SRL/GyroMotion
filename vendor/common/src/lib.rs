@@ -393,6 +393,10 @@ impl GyroflowPluginBase {
                 ParameterType::Slider   { id: "ZoomLimit",              label: "Crop massimo (zoom %)", hint: "100% corrisponde alla scala originale. 110% permette uno zoom fino a 1,10×.",                   min: 51.0,   max: 300.0, default: 130.0 },
                 ParameterType::Slider   { id: "HorizonLockAmount",      label: "Blocco orizzonte (%)",         hint: "0 segue la camera. 100 punta a mantenere l’orizzonte in piano.",          min: 0.0,    max: 100.0, default: 0.0 },
                 ParameterType::Group { id: "MotionFine", label: "Regolazioni avanzate", opened: false, parameters: vec![
+                ParameterType::Group { id: "MotionSourceGroup", label: "Sorgente movimento", opened: false, parameters: vec![
+                    ParameterType::Select { id: "MotionSource", label: "Sorgente movimento", hint: "Automatica usa il database MecenaClipDB (originali offline, proxy, ProRes RAW collegato alla clip interna, adjustment clip) e altrimenti il file della clip. Solo file legge sempre la telemetria dall’originale.", options: MOTION_SOURCE_LABELS.to_vec(), default: MOTION_SOURCE_LABELS[0] },
+                    ParameterType::Slider { id: "SyncOffset", label: "Offset sincronismo (frame)", hint: "Sposta i dati movimento rispetto all’immagine, in frame della clip che li ha registrati. Si somma all’offset del collegamento per timecode. Accetta keyframe.", min: -250.0, max: 250.0, default: 0.0 },
+                ] },
                 ParameterType::Select   { id: "SmoothingMethod",        label: "Motore",               hint: "Percorso ottimale calcola la traiettoria più fluida su tutta la clip restando nel crop massimo: segue le panoramiche senza ritardo. Adattivo è il filtro classico di Gyroflow.", options: SMOOTHING_METHOD_LABELS.to_vec(), default: SMOOTHING_METHOD_LABELS[METHOD_ADAPTIVE as usize] },
                 ParameterType::Slider   { id: "SmoothPitch",            label: "Bilanciamento tilt (%)",  hint: "Fluidità sul beccheggio (alto/basso), in percentuale della Fluidità. Il rimbalzo dei passi arriva soprattutto qui.", min: 1.0, max: 200.0, default: 100.0 },
                 ParameterType::Slider   { id: "SmoothYaw",              label: "Bilanciamento pan (%)",   hint: "Fluidità sull’imbardata (destra/sinistra), in percentuale della Fluidità. Meno di 100 lascia più libere le panoramiche.", min: 1.0, max: 200.0, default: 100.0 },
@@ -444,6 +448,12 @@ impl GyroflowPluginBase {
         ]
     }
 }
+
+/// The "Sorgente movimento" choices, by index (saved with the projects: append only)
+pub const MOTION_SOURCE_LABELS: [&str; 2] = [
+    "Automatica · database, collegamenti, file",
+    "Solo file della clip",
+];
 
 /// The "Stile" choices, by index (saved with the projects: append only)
 pub const STAB_PRESET_LABELS: [&str; 5] = [
