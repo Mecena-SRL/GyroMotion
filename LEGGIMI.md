@@ -42,7 +42,30 @@ Per una cadenza creativa diversa da quella di timeline, scegli **Look · FPS e s
 
 **MASTER (%)** è il controllo da animare in Edit o Color. A 100 applica la correzione impostata, a 0 azzera la rotazione di stabilizzazione e lo zoom adattivo. Valori intermedi interpolano la rotazione per riga e il campo visivo. La correzione ottica del profilo e l’orientamento del file appartengono alla geometria di base.
 
-**Fluidità massima** imposta quanto smorzare il movimento a MASTER 100. **Crop massimo (zoom %)** imposta il limite richiesto al calcolo adattivo di Gyroflow. A 110% la scala è 1,10× e resta circa il 91% della larghezza. Il limite riguarda lo zoom adattivo e il risultato dipende anche dalla correzione ottica. **Blocco orizzonte (%)** dosa il livellamento. Nel rapporto **Dati rilevati** trovi sorgente telemetrica, dimensioni, fps, conteggi IMU e ottica, prima distanza di fuoco valida e tempo di lettura del sensore quando disponibili. La prima distanza è informativa, non descrive la profondità della scena.
+**Stile** sceglie il comportamento. Ogni nuova istanza parte da **Cinematografico**. Gli stili usano il motore **Percorso ottimale**, che calcola la traiettoria su tutta la clip minimizzando gli strappi del movimento e resta dentro il **Crop massimo**: dove il crop non basta, riduce la fluidità solo in quel tratto.
+
+| Stile | Cosa fa | Valori principali |
+| --- | --- | --- |
+| Micromosso · solo tremolio | Toglie vibrazioni e tremolio della mano, lascia il movimento dell’operatore | τ ≈ 0,06 s su tutti gli assi, crop 108% |
+| Controllato · limita il movimento | Smorza i movimenti bruschi e ampi, con una leggera tendenza a restare fermo | τ ≈ 0,6 s, inerzia 0,5, crop 120% |
+| Cinematografico · attenua i passi | Toglie il rimbalzo dei passi su tilt e rollio, lascia libere le panoramiche | tilt/rollio τ ≈ 0,9 s, pan τ ≈ 0,3 s, crop 125% |
+| Crane / gimbal · fluido su tutti gli assi | Movimento lento e morbido, partenze e arresti dolci, orizzonte in piano, crop fisso senza respiro | tilt/rollio τ ≈ 1,7 s, pan τ ≈ 0,6 s, orizzonte 100%, zoom statico, crop 135% |
+| Personalizzato | Usa le regolazioni avanzate così come sono | — |
+
+τ è la costante di tempo: il filtro lascia passare i movimenti più lenti di circa 1/(2π·τ) Hz. Dopo aver scelto uno stile puoi rifinire **Fluidità** (accetta keyframe), **Crop massimo** e **Blocco orizzonte** senza perdere lo stile. Modificando una regolazione avanzata lo stile diventa **Personalizzato**. Le istanze salvate prima di questa versione si aprono come **Personalizzato** con il motore **Adattivo** e conservano il comportamento precedente.
+
+**Regolazioni avanzate**:
+- **Motore**: Percorso ottimale (più fluido, segue le panoramiche senza ritardo costante) oppure Adattivo (il filtro classico di Gyroflow).
+- **Bilanciamento tilt / pan / rollio (%)**: la fluidità di ciascun asse in percentuale della Fluidità. Il rimbalzo dei passi arriva soprattutto sul tilt.
+- **Tempo di fluidità massimo (s)**: la costante di tempo a Fluidità 100.
+- **Reattività nei movimenti rapidi (s)**: solo Adattivo, evita scatti all’inizio delle panoramiche.
+- **Inerzia** e **Tendenza a restare fermo**: solo Percorso ottimale. La prima addolcisce partenze e arresti, la seconda attenua anche i movimenti lenti intenzionali.
+- **Resta nel crop massimo**: solo Percorso ottimale.
+- **Zoom adattivo** Dinamico o Statico e **Finestra zoom dinamico (s)**: lo statico usa un solo crop per tutta la clip ed elimina il respiro dell’inquadratura.
+
+Limiti: il giroscopio misura solo le rotazioni. La stabilizzazione corregge tilt, pan e rollio; lo spostamento fisico della camera (altezza, passi, avanzamento) resta nell’immagine come traslazione e parallasse. Il rimbalzo dei passi si vede soprattutto come oscillazione del tilt e viene attenuato da lì. Per eliminare anche la traslazione serve una stabilizzazione ottica sull’immagine.
+
+**Crop massimo (zoom %)** imposta il limite richiesto al calcolo adattivo di Gyroflow. A 110% la scala è 1,10× e resta circa il 91% della larghezza. Il limite riguarda lo zoom adattivo e il risultato dipende anche dalla correzione ottica. **Blocco orizzonte (%)** dosa il livellamento. Nel rapporto **Dati rilevati** trovi sorgente telemetrica, dimensioni, fps, conteggi IMU e ottica, prima distanza di fuoco valida e tempo di lettura del sensore quando disponibili. La prima distanza è informativa, non descrive la profondità della scena.
 
 ## Lettura automatica della ripresa
 

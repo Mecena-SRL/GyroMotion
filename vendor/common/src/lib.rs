@@ -39,6 +39,18 @@ pub enum Params {
     LensCorrectionStrength,
     HorizonLockAmount,
     HorizonLockRoll,
+    StabPreset,
+    SmoothingMethod,
+    SmoothPitch,
+    SmoothYaw,
+    SmoothRoll,
+    TimeConstant,
+    FastTimeConstant,
+    MotionInertia,
+    MotionBrake,
+    CropConstraint,
+    ZoomMode,
+    ZoomWindow,
     // PositionX,
     // PositionY,
     AdditionalPitch,
@@ -376,10 +388,22 @@ impl GyroflowPluginBase {
             ] },
             ParameterType::Group { id: "AdjustGroup", label: "Stabilizzazione", opened: true, parameters: vec![
                 ParameterType::Slider { id: "Master", label: "MASTER (%)", hint: "Anima la quantità di stabilizzazione tra 0 e 100.", min: 0.0, max: 100.0, default: 100.0 },
-                ParameterType::Slider   { id: "Smoothness",             label: "Fluidità massima", hint: "Verso sinistra conservi la mano. Verso destra attenui maggiormente le oscillazioni.",                   min: 1.0,    max: 300.0, default: 50.0 },
+                ParameterType::Select   { id: "StabPreset", label: "Stile", hint: "Scegli il comportamento. Ogni stile imposta fluidità, crop, orizzonte e le regolazioni avanzate; poi puoi rifinire con i cursori qui sotto. Toccando le regolazioni avanzate lo stile diventa Personalizzato.", options: STAB_PRESET_LABELS.to_vec(), default: STAB_PRESET_LABELS[PRESET_CUSTOM as usize] },
+                ParameterType::Slider   { id: "Smoothness",             label: "Fluidità", hint: "Intensità dello stile. Verso sinistra conservi la mano, verso destra attenui di più. Accetta keyframe.",                   min: 1.0,    max: 300.0, default: 50.0 },
                 ParameterType::Slider   { id: "ZoomLimit",              label: "Crop massimo (zoom %)", hint: "100% corrisponde alla scala originale. 110% permette uno zoom fino a 1,10×.",                   min: 51.0,   max: 300.0, default: 130.0 },
                 ParameterType::Slider   { id: "HorizonLockAmount",      label: "Blocco orizzonte (%)",         hint: "0 segue la camera. 100 punta a mantenere l’orizzonte in piano.",          min: 0.0,    max: 100.0, default: 0.0 },
                 ParameterType::Group { id: "MotionFine", label: "Regolazioni avanzate", opened: false, parameters: vec![
+                ParameterType::Select   { id: "SmoothingMethod",        label: "Motore",               hint: "Percorso ottimale calcola la traiettoria più fluida su tutta la clip restando nel crop massimo: segue le panoramiche senza ritardo. Adattivo è il filtro classico di Gyroflow.", options: SMOOTHING_METHOD_LABELS.to_vec(), default: SMOOTHING_METHOD_LABELS[METHOD_ADAPTIVE as usize] },
+                ParameterType::Slider   { id: "SmoothPitch",            label: "Bilanciamento tilt (%)",  hint: "Fluidità sul beccheggio (alto/basso), in percentuale della Fluidità. Il rimbalzo dei passi arriva soprattutto qui.", min: 1.0, max: 200.0, default: 100.0 },
+                ParameterType::Slider   { id: "SmoothYaw",              label: "Bilanciamento pan (%)",   hint: "Fluidità sull’imbardata (destra/sinistra), in percentuale della Fluidità. Meno di 100 lascia più libere le panoramiche.", min: 1.0, max: 200.0, default: 100.0 },
+                ParameterType::Slider   { id: "SmoothRoll",             label: "Bilanciamento rollio (%)", hint: "Fluidità sul rollio, in percentuale della Fluidità.", min: 1.0, max: 200.0, default: 100.0 },
+                ParameterType::Slider   { id: "TimeConstant",           label: "Tempo di fluidità massimo (s)", hint: "Costante di tempo alla Fluidità 100. Più alta rende il movimento più lento e morbido.", min: 0.1, max: 10.0, default: 1.0 },
+                ParameterType::Slider   { id: "FastTimeConstant",       label: "Reattività nei movimenti rapidi (s)", hint: "Solo motore Adattivo: fluidità minima durante i movimenti veloci. Valori più alti evitano scatti all’inizio delle panoramiche.", min: 0.01, max: 1.0, default: 0.1 },
+                ParameterType::Slider   { id: "MotionInertia",          label: "Inerzia",              hint: "Solo Percorso ottimale: frena le variazioni di velocità, per partenze e arresti morbidi come su un crane.", min: 0.0, max: 5.0, default: 0.0 },
+                ParameterType::Slider   { id: "MotionBrake",            label: "Tendenza a restare fermo", hint: "Solo Percorso ottimale: attenua anche i movimenti lenti e intenzionali. 0 segue fedelmente le panoramiche.", min: 0.0, max: 5.0, default: 0.0 },
+                ParameterType::Checkbox { id: "CropConstraint",         label: "Resta nel crop massimo", hint: "Solo Percorso ottimale: riduce la fluidità solo dove servirebbe uscire dal Crop massimo.", default: true },
+                ParameterType::Select   { id: "ZoomMode",               label: "Zoom adattivo",        hint: "Dinamico adatta il crop al movimento. Statico usa un unico crop per tutta la clip, senza respiro dell’inquadratura.", options: ZOOM_MODE_LABELS.to_vec(), default: ZOOM_MODE_LABELS[0] },
+                ParameterType::Slider   { id: "ZoomWindow",             label: "Finestra zoom dinamico (s)", hint: "Più ampia rende più lente le variazioni del crop.", min: 0.5, max: 15.0, default: 4.0 },
                 ParameterType::Slider   { id: "LensCorrectionStrength", label: "Lens correction",      hint: "Lens correction",              min: 0.0,    max: 100.0, default: 100.0 },
                 ParameterType::Slider   { id: "HorizonLockRoll",        label: "Horizon roll",         hint: "Horizon lock roll adjustment", min: -100.0, max: 100.0, default: 0.0 },
                 //ParameterType::Slider   { id: "PositionX",              label: "Position offset X",    hint: "Position offset X",            min: -100.0, max: 100.0, default: 0.0 },
@@ -420,6 +444,64 @@ impl GyroflowPluginBase {
         ]
     }
 }
+
+/// The "Stile" choices, by index (saved with the projects: append only)
+pub const STAB_PRESET_LABELS: [&str; 5] = [
+    "Micromosso · solo tremolio",
+    "Controllato · limita il movimento",
+    "Cinematografico · attenua i passi",
+    "Crane / gimbal · fluido su tutti gli assi",
+    "Personalizzato",
+];
+pub const PRESET_CUSTOM: i32 = 4;
+/// The "Motore" choices, by index
+pub const SMOOTHING_METHOD_LABELS: [&str; 2] = ["Percorso ottimale (più fluido)", "Adattivo (Gyroflow classico)"];
+pub const METHOD_OPTIMAL: i32 = 0;
+pub const METHOD_ADAPTIVE: i32 = 1;
+/// The "Zoom adattivo" choices, by index
+pub const ZOOM_MODE_LABELS: [&str; 2] = ["Dinamico", "Statico (nessun respiro)"];
+pub const ZOOM_STATIC: i32 = 1;
+
+/// What a "Stile" writes into the parameters. With the Optimal path the time constant per axis is
+/// `time_constant · (smoothness · axis)²`, the cutoff of the jerk filter about `1 / (2π·τ)`
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StabPresetValues {
+    pub smoothness: f64,
+    pub zoom_limit: f64,
+    pub horizon_lock: f64,
+    pub method: i32,
+    /// Pitch, yaw, roll, % of the smoothness
+    pub axes: [f64; 3],
+    pub time_constant: f64,
+    pub fast_time_constant: f64,
+    pub inertia: f64,
+    pub brake: f64,
+    pub zoom_mode: i32,
+    pub zoom_window: f64,
+}
+pub const STAB_PRESETS: [StabPresetValues; 4] = [
+    // Micromosso: τ ≈ 0.06 s, cutoff ≈ 2.5 Hz. Vibration and the hand's tremor go, the operator's motion stays
+    StabPresetValues { smoothness: 25.0, zoom_limit: 108.0, horizon_lock: 0.0,   method: METHOD_OPTIMAL, axes: [100.0, 100.0, 100.0], time_constant: 1.0, fast_time_constant: 0.1,  inertia: 0.0, brake: 0.0, zoom_mode: 0, zoom_window: 4.0 },
+    // Controllato: τ ≈ 0.6 s, with a pull toward standing still that tames sudden, large moves
+    StabPresetValues { smoothness: 55.0, zoom_limit: 120.0, horizon_lock: 0.0,   method: METHOD_OPTIMAL, axes: [100.0, 100.0, 100.0], time_constant: 2.0, fast_time_constant: 0.2,  inertia: 0.5, brake: 0.3, zoom_mode: 0, zoom_window: 6.0 },
+    // Cinematografico: pitch and roll τ ≈ 0.9 s, the cutoff ~11× below the step rate (~2 Hz), yaw freer (τ ≈ 0.32 s) so
+    // pans follow the operator and the parallax of the camera's travel stays as shot
+    StabPresetValues { smoothness: 60.0, zoom_limit: 125.0, horizon_lock: 0.0,   method: METHOD_OPTIMAL, axes: [100.0, 60.0, 100.0],  time_constant: 2.5, fast_time_constant: 0.25, inertia: 0.3, brake: 0.0, zoom_mode: 0, zoom_window: 8.0 },
+    // Crane / gimbal: pitch and roll τ ≈ 1.7 s, yaw ≈ 0.6 s, eased starts and stops, level horizon, one crop for the clip
+    StabPresetValues { smoothness: 75.0, zoom_limit: 135.0, horizon_lock: 100.0, method: METHOD_OPTIMAL, axes: [100.0, 60.0, 100.0],  time_constant: 3.0, fast_time_constant: 0.3,  inertia: 0.5, brake: 0.0, zoom_mode: ZOOM_STATIC, zoom_window: 8.0 },
+];
+/// The preset new instances start with
+pub const DEFAULT_PRESET: i32 = 2;
+/// The advanced parameters a preset sets: editing one makes the style "Personalizzato"
+pub const PRESET_ADVANCED_PARAMS: [Params; 10] = [
+    Params::SmoothingMethod, Params::SmoothPitch, Params::SmoothYaw, Params::SmoothRoll, Params::TimeConstant,
+    Params::FastTimeConstant, Params::MotionInertia, Params::MotionBrake, Params::ZoomMode, Params::ZoomWindow,
+];
+/// The parameters that change the smoothing algorithm or the zoom it's set up with (see `configure_smoothing`)
+pub const SMOOTHING_PARAMS: [Params; 11] = [
+    Params::SmoothingMethod, Params::SmoothPitch, Params::SmoothYaw, Params::SmoothRoll, Params::TimeConstant,
+    Params::FastTimeConstant, Params::MotionInertia, Params::MotionBrake, Params::CropConstraint, Params::ZoomMode, Params::ZoomWindow,
+];
 
 /// See `GyroflowPluginBase::render_geometry`
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -651,6 +733,7 @@ impl GyroflowPluginBaseInstance {
         let _ = params.set_enabled(Params::LensCorrectionStrength, loaded);
         let _ = params.set_enabled(Params::HorizonLockAmount, loaded);
         let _ = params.set_enabled(Params::HorizonLockRoll, loaded);
+        for p in SMOOTHING_PARAMS { let _ = params.set_enabled(p, loaded); }
         //let _ = params.set_enabled(Params::PositionX, loaded);
         //let _ = params.set_enabled(Params::PositionY, loaded);
         let _ = params.set_enabled(Params::AdditionalPitch, loaded);
@@ -764,6 +847,129 @@ impl GyroflowPluginBaseInstance {
         }
     }
 
+    /// A parameter's value, or `default` where it has none a slider can give (a host or a test that doesn't have it)
+    fn positive(params: &dyn GyroflowPluginParams, param: Params, time: Option<&TimeType>, default: f64) -> f64 {
+        let v = match time { Some(t) => params.get_f64_at_time(param, t.clone()), None => params.get_f64(param) };
+        v.ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(default)
+    }
+    /// The smoothness of each axis (pitch, yaw, roll) in Gyroflow's scale: the smoothness times the axis' share
+    fn axis_smoothness(params: &dyn GyroflowPluginParams, time: Option<&TimeType>) -> [f64; 3] {
+        let s = Self::positive(params, Params::Smoothness, time, 50.0) / 100.0;
+        [Params::SmoothPitch, Params::SmoothYaw, Params::SmoothRoll].map(|p| s * Self::positive(params, p, time, 100.0) / 100.0)
+    }
+    fn per_axis(params: &dyn GyroflowPluginParams) -> bool {
+        [Params::SmoothPitch, Params::SmoothYaw, Params::SmoothRoll].iter().any(|p| (Self::positive(params, *p, None, 100.0) - 100.0).abs() > 1e-6)
+    }
+    /// Gyroflow's adaptive zoom window for the parameters: -1 for a static zoom, the window in seconds otherwise
+    fn zoom_window(params: &dyn GyroflowPluginParams) -> f64 {
+        if params.get_i32(Params::ZoomMode).ok() == Some(ZOOM_STATIC) { -1.0 } else { Self::positive(params, Params::ZoomWindow, None, 4.0) }
+    }
+
+    /// Sets up `smoothing` for the parameters: the algorithm, and what of it isn't keyframable. The smoothness and the
+    /// per axis smoothness the algorithms read from the keyframes too (see `cache_keyframes`)
+    pub fn configure_smoothing(params: &dyn GyroflowPluginParams, smoothing: &mut gyroflow_core::smoothing::Smoothing) {
+        let optimal = params.get_i32(Params::SmoothingMethod).unwrap_or(METHOD_ADAPTIVE) == METHOD_OPTIMAL;
+        let s = Self::positive(params, Params::Smoothness, None, 50.0) / 100.0;
+        let axes = Self::axis_smoothness(params, None);
+        let time_constant = Self::positive(params, Params::TimeConstant, None, if optimal { 2.0 } else { 1.0 });
+        smoothing.set_current(if optimal { 2 } else { 1 });
+        let alg = smoothing.current_mut();
+        alg.set_parameter("smoothness", s);
+        alg.set_parameter("smoothness_pitch", axes[0]);
+        alg.set_parameter("smoothness_yaw", axes[1]);
+        alg.set_parameter("smoothness_roll", axes[2]);
+        alg.set_parameter("per_axis", if Self::per_axis(params) { 1.0 } else { 0.0 });
+        if optimal {
+            let weight = |p: Params| params.get_f64(p).ok().filter(|v| v.is_finite()).unwrap_or(0.0).max(0.0);
+            alg.set_parameter("max_time_constant", time_constant);
+            alg.set_parameter("crop_constraint", if params.get_bool(Params::CropConstraint).unwrap_or(true) { 1.0 } else { 0.0 });
+            alg.set_parameter("order_1", weight(Params::MotionBrake));
+            alg.set_parameter("order_2", weight(Params::MotionInertia));
+            alg.set_parameter("order_3", 1.0);
+        } else {
+            alg.set_parameter("max_smoothness", time_constant);
+            alg.set_parameter("alpha_0_1s", Self::positive(params, Params::FastTimeConstant, None, 0.1));
+        }
+    }
+    /// Applies the smoothing algorithm and the adaptive zoom of the parameters to `stab`. The caller invalidates
+    pub fn apply_smoothing(params: &dyn GyroflowPluginParams, stab: &StabilizationManager) {
+        Self::configure_smoothing(params, &mut stab.smoothing.write());
+        let window = Self::zoom_window(params);
+        if stab.params.read().adaptive_zoom_window != window {
+            stab.set_adaptive_zoom(window);
+        }
+    }
+    /// Whether `stab` smooths and zooms as `apply_smoothing` would set it up
+    fn smoothing_agrees(params: &dyn GyroflowPluginParams, stab: &StabilizationManager) -> bool {
+        let current = stab.smoothing.read();
+        let mut expected = current.clone();
+        Self::configure_smoothing(params, &mut expected);
+        expected.current().get_name() == current.current().get_name()
+            && expected.current().get_checksum() == current.current().get_checksum()
+            && stab.params.read().adaptive_zoom_window == Self::zoom_window(params)
+    }
+    /// Reads the parameters of the "Personalizzato" style back from a loaded project or the defaults of a video
+    fn read_smoothing(params: &mut dyn GyroflowPluginParams, smoothing: &gyroflow_core::smoothing::Smoothing, zoom_window: f64) -> PluginResult<()> {
+        let alg = smoothing.current();
+        let optimal = alg.get_name() == "Optimal path";
+        params.set_i32(Params::SmoothingMethod, if optimal { METHOD_OPTIMAL } else { METHOD_ADAPTIVE })?;
+        let s = alg.get_parameter("smoothness");
+        let per_axis = alg.get_parameter("per_axis") > 0.1 && s > 0.0;
+        for (p, name) in [(Params::SmoothPitch, "smoothness_pitch"), (Params::SmoothYaw, "smoothness_yaw"), (Params::SmoothRoll, "smoothness_roll")] {
+            params.set_f64(p, if per_axis { (alg.get_parameter(name) / s * 100.0).clamp(1.0, 200.0) } else { 100.0 })?;
+        }
+        let set_positive = |params: &mut dyn GyroflowPluginParams, p: Params, v: f64| -> PluginResult<()> { if v.is_finite() && v > 0.0 { params.set_f64(p, v)?; } Ok(()) };
+        if optimal {
+            set_positive(params, Params::TimeConstant, alg.get_parameter("max_time_constant"))?;
+            params.set_f64(Params::MotionBrake, alg.get_parameter("order_1").max(0.0))?;
+            params.set_f64(Params::MotionInertia, alg.get_parameter("order_2").max(0.0))?;
+            params.set_bool(Params::CropConstraint, alg.get_parameter("crop_constraint") > 0.1)?;
+        } else {
+            set_positive(params, Params::TimeConstant, alg.get_parameter("max_smoothness"))?;
+            set_positive(params, Params::FastTimeConstant, alg.get_parameter("alpha_0_1s"))?;
+        }
+        if zoom_window < -0.9 {
+            params.set_i32(Params::ZoomMode, ZOOM_STATIC)?;
+        } else {
+            params.set_i32(Params::ZoomMode, 0)?;
+            set_positive(params, Params::ZoomWindow, zoom_window)?;
+        }
+        Ok(())
+    }
+    /// Whether `param` has the value `preset` gives it
+    fn preset_has(params: &dyn GyroflowPluginParams, preset: &StabPresetValues, param: Params) -> bool {
+        let f = |v: f64| params.get_f64(param).is_ok_and(|x| (x - v).abs() < 1e-6);
+        match param {
+            Params::SmoothingMethod  => params.get_i32(param).ok() == Some(preset.method),
+            Params::ZoomMode         => params.get_i32(param).ok() == Some(preset.zoom_mode),
+            Params::SmoothPitch      => f(preset.axes[0]),
+            Params::SmoothYaw        => f(preset.axes[1]),
+            Params::SmoothRoll       => f(preset.axes[2]),
+            Params::TimeConstant     => f(preset.time_constant),
+            Params::FastTimeConstant => f(preset.fast_time_constant),
+            Params::MotionInertia    => f(preset.inertia),
+            Params::MotionBrake      => f(preset.brake),
+            Params::ZoomWindow       => f(preset.zoom_window),
+            _ => true,
+        }
+    }
+    /// Writes a style's values into the parameters, but for the keyframed ones, which keep their animation
+    pub fn write_preset(params: &mut dyn GyroflowPluginParams, preset: &StabPresetValues) -> PluginResult<()> {
+        let f64s = [
+            (Params::Smoothness, preset.smoothness), (Params::ZoomLimit, preset.zoom_limit), (Params::HorizonLockAmount, preset.horizon_lock),
+            (Params::SmoothPitch, preset.axes[0]), (Params::SmoothYaw, preset.axes[1]), (Params::SmoothRoll, preset.axes[2]),
+            (Params::TimeConstant, preset.time_constant), (Params::FastTimeConstant, preset.fast_time_constant),
+            (Params::MotionInertia, preset.inertia), (Params::MotionBrake, preset.brake), (Params::ZoomWindow, preset.zoom_window),
+        ];
+        for (p, v) in f64s {
+            if !params.is_keyframed(p) { params.set_f64(p, v)?; }
+        }
+        params.set_i32(Params::SmoothingMethod, preset.method)?;
+        params.set_i32(Params::ZoomMode, preset.zoom_mode)?;
+        params.set_bool(Params::CropConstraint, true)?;
+        Ok(())
+    }
+
     /// Makes `stab` read the keyframable parameters from this instance's cache (see `cache_keyframes`). Only for a
     /// stabilization the instance has to itself, or sets up for the instances that share it (see `ever_changed`)
     pub fn set_keyframe_provider(&self, stab: &StabilizationManager) {
@@ -840,6 +1046,21 @@ impl GyroflowPluginBaseInstance {
             }
         }
 
+        // The smoothness per axis, the smoothness times each axis' share: animated when either is
+        let animated = params.is_keyframed(Params::Smoothness);
+        for (i, (typ, param)) in [(KeyframeType::SmoothingParamPitch, Params::SmoothPitch), (KeyframeType::SmoothingParamYaw, Params::SmoothYaw), (KeyframeType::SmoothingParamRoll, Params::SmoothRoll)].into_iter().enumerate() {
+            if animated || params.is_keyframed(param) {
+                for t in 0..num_frames {
+                    let time = t as f64;
+                    let timestamp_us = ((time / fps * 1_000_000.0)).round() as i64;
+                    let axes = Self::axis_smoothness(params, Some(&TimeType::FrameOrMicrosecond((Some(time), Some(timestamp_us)))));
+                    mgr.set(&typ, timestamp_us, axes[i]);
+                }
+            } else {
+                mgr.set(&typ, 0, Self::axis_smoothness(params, None)[i]);
+            }
+        }
+
         let mut kparams = self.keyframable_params.write();
         kparams.use_gyroflows_keyframes = use_gyroflows_keyframes;
         kparams.cached_keyframes = mgr;
@@ -876,7 +1097,11 @@ impl GyroflowPluginBaseInstance {
                     v.invalidate_blocking_zooming();
                 }
                 Params::Smoothness | Params::ZoomLimit | Params::HorizonLockAmount | Params::HorizonLockRoll |
-                Params::AdditionalPitch | Params::AdditionalYaw | Params::RecalculateKeyframes => {
+                Params::AdditionalPitch | Params::AdditionalYaw | Params::RecalculateKeyframes | Params::StabPreset |
+                Params::SmoothingMethod | Params::SmoothPitch | Params::SmoothYaw | Params::SmoothRoll | Params::TimeConstant |
+                Params::FastTimeConstant | Params::MotionInertia | Params::MotionBrake | Params::CropConstraint |
+                Params::ZoomMode | Params::ZoomWindow => {
+                    Self::apply_smoothing(params, v);
                     v.invalidate_blocking_smoothing();
                     v.invalidate_blocking_zooming();
                 },
@@ -915,6 +1140,9 @@ impl GyroflowPluginBaseInstance {
             Params::HorizonLockAmount | Params::HorizonLockRoll | Params::AdditionalPitch | Params::AdditionalYaw |
             Params::Rotation | Params::InputRotation | Params::VideoSpeed | Params::IntegrationMethod |
             Params::UseGyroflowsKeyframes | Params::RecalculateKeyframes |
+            Params::StabPreset | Params::SmoothingMethod | Params::SmoothPitch | Params::SmoothYaw | Params::SmoothRoll |
+            Params::TimeConstant | Params::FastTimeConstant | Params::MotionInertia | Params::MotionBrake |
+            Params::CropConstraint | Params::ZoomMode | Params::ZoomWindow |
             Params::OutputWidth | Params::OutputHeight | Params::OutputSizeSwap | Params::OutputSizeToTimeline |
             Params::ToggleOverview | Params::DontDrawOutside | Params::Interpolation)
     }
@@ -973,6 +1201,8 @@ impl GyroflowPluginBaseInstance {
             }
         }
 
+        Self::apply_smoothing(params, stab);
+
         if recompute {
             stab.invalidate_smoothing();
             stab.recompute_blocking();
@@ -1010,7 +1240,9 @@ impl GyroflowPluginBaseInstance {
         let integration = params.get_i32(Params::IntegrationMethod).map_or(true, |x| stab.gyro.read().integration_method == x as usize);
         let interpolation = stab.stabilization.read().interpolation as u32 == Self::interpolation(params) as u32;
 
-        keyframes && output_size && overview && integration && interpolation
+        let smoothing = Self::smoothing_agrees(params, stab);
+
+        keyframes && output_size && overview && integration && interpolation && smoothing
     }
 
     /// Gives the instance a stabilization of its own, under a new instance id, to change from now on. It shared it with
@@ -1219,10 +1451,14 @@ impl GyroflowPluginBaseInstance {
                     let smooth = stab.smoothing.read();
                     let smoothness = smooth.current().get_parameter("smoothness");
                     params.set_f64(Params::Fov,                    gf_params.fov)?;
-                    params.set_f64(Params::Smoothness,             smoothness * 100.0)?;
-                    params.set_f64(Params::ZoomLimit,              gf_params.max_zoom.unwrap_or(0.0))?;
+                    // A style keeps its own smoothness, crop and horizon. "Personalizzato" takes the project's
+                    if params.get_i32(Params::StabPreset).map_or(true, |x| x == PRESET_CUSTOM) {
+                        params.set_f64(Params::Smoothness,         smoothness * 100.0)?;
+                        params.set_f64(Params::ZoomLimit,          gf_params.max_zoom.unwrap_or(0.0))?;
+                        params.set_f64(Params::HorizonLockAmount,  if smooth.horizon_lock.lock_enabled { smooth.horizon_lock.horizonlockpercent } else { 0.0 })?;
+                        Self::read_smoothing(params, &smooth, gf_params.adaptive_zoom_window)?;
+                    }
                     params.set_f64(Params::LensCorrectionStrength, (gf_params.lens_correction_amount * 100.0).min(100.0))?;
-                    params.set_f64(Params::HorizonLockAmount,      if smooth.horizon_lock.lock_enabled { smooth.horizon_lock.horizonlockpercent } else { 0.0 })?;
                     params.set_f64(Params::HorizonLockRoll,        if smooth.horizon_lock.lock_enabled { smooth.horizon_lock.horizonroll } else { 0.0 })?;
                     params.set_f64(Params::VideoSpeed,             gf_params.video_speed * 100.0)?;
                     //params.set_f64(Params::PositionX,              gf_params.adaptive_zoom_center_offset.0 * 100.0)?;
@@ -1449,6 +1685,20 @@ impl GyroflowPluginBaseInstance {
                 params.set_string(Params::ProjectData, &"")?;
             }
         }
+        if user_edited && param == Params::StabPreset {
+            if let Some(preset) = params.get_i32(Params::StabPreset).ok().and_then(|x| STAB_PRESETS.get(x as usize)) {
+                Self::write_preset(params, preset)?;
+            }
+        }
+        // An advanced value edited away from the style's makes it "Personalizzato". Compared by value, as a host may
+        // report the values a style writes as edits of the user too
+        if user_edited && PRESET_ADVANCED_PARAMS.contains(&param) {
+            if let Some(preset) = params.get_i32(Params::StabPreset).ok().and_then(|x| STAB_PRESETS.get(x as usize)) {
+                if !Self::preset_has(params, preset, param) {
+                    params.set_i32(Params::StabPreset, PRESET_CUSTOM)?;
+                }
+            }
+        }
         if user_edited {
             if param == Params::OutputWidth || param == Params::OutputHeight || param == Params::OutputSizeSwap || param == Params::OutputSizeToTimeline {
                 if param == Params::OutputSizeSwap {
@@ -1472,7 +1722,10 @@ impl GyroflowPluginBaseInstance {
                 //Params::PositionX | Params::PositionY |
                 Params::AdditionalPitch | Params::AdditionalYaw |
                 Params::Rotation | Params::InputRotation | Params::VideoSpeed | Params::IntegrationMethod |
-                Params::UseGyroflowsKeyframes | Params::RecalculateKeyframes => {
+                Params::UseGyroflowsKeyframes | Params::RecalculateKeyframes |
+                Params::StabPreset | Params::SmoothingMethod | Params::SmoothPitch | Params::SmoothYaw | Params::SmoothRoll |
+                Params::TimeConstant | Params::FastTimeConstant | Params::MotionInertia | Params::MotionBrake |
+                Params::CropConstraint | Params::ZoomMode | Params::ZoomWindow => {
 
                     params.set_string(Params::Status, "Calculating...")?;
                     let use_gyroflows_keyframes = params.get_bool(Params::UseGyroflowsKeyframes).unwrap_or_default();
@@ -1890,6 +2143,132 @@ mod tests {
         inst.detach(&mut params, &cache).unwrap();
         assert!(inst.ever_changed && inst.managers.is_empty() && cache.lock().is_empty());
         assert_ne!(id(&params), before);
+    }
+
+    /// The parameters of a style, as `write_preset` leaves them
+    fn styled(preset: i32) -> TestParams {
+        let mut params = params();
+        GyroflowPluginBaseInstance::write_preset(&mut params, &STAB_PRESETS[preset as usize]).unwrap();
+        params.i32s.insert(Params::StabPreset, preset);
+        params
+    }
+    /// Walking with a pan: a 1° bob at the step rate (2 Hz) on the pitch, a 0.2° tremor at 12 Hz on every axis, and a
+    /// 20°/s pan from 3 to 9 s, eased in and out over 0.5 s. Sampled at 200 Hz over 12 s
+    fn walking_pan() -> (gyroflow_core::gyro_source::TimeQuat, Vec<[f64; 3]>) {
+        use std::f64::consts::PI;
+        let d = PI / 180.0;
+        let pan = |t: f64| -> f64 {
+            // Angle (°) of a pan at 20°/s between 3.25 and 8.75 s, with linear ramps of the speed over 0.5 s at each end
+            let v = 20.0;
+            let ramp = |x: f64| if x <= 0.0 { 0.0 } else if x < 0.5 { v * x * x / 1.0 } else { v * (x - 0.25) };
+            ramp(t - 3.0) - ramp(t - 8.5)
+        };
+        let mut quats = std::collections::BTreeMap::new();
+        let mut intended = Vec::new();
+        for i in 0..2400 {
+            let t = i as f64 / 200.0;
+            let tremor = 0.2 * (2.0 * PI * 12.0 * t).sin();
+            let a = [1.0 * (2.0 * PI * 2.0 * t).sin() + tremor, pan(t) + tremor, tremor];
+            quats.insert((t * 1_000_000.0) as i64, gyroflow_core::gyro_source::Quat64::from_euler_angles(a[0] * d, a[1] * d, a[2] * d));
+            intended.push([0.0, pan(t), 0.0]);
+        }
+        (quats, intended)
+    }
+    /// The smoothed path's distance to the intended one (°): its RMS on the pitch and the roll between 1 and 11 s, and
+    /// the largest on the yaw while the pan is steady (5 to 7 s), how far the path lags it
+    fn smoothing_error(params: &TestParams) -> [f64; 3] {
+        let (quats, intended) = walking_pan();
+        let mut smoothing = gyroflow_core::smoothing::Smoothing::default();
+        GyroflowPluginBaseInstance::configure_smoothing(params, &mut smoothing);
+        let smoothed = smoothing.current().smooth(&quats, 12_000.0, &gyroflow_core::stabilization::ComputeParams::default());
+        let (mut sum, mut lag, mut n) = ([0.0; 3], 0.0f64, 0.0);
+        for (i, (_, q)) in smoothed.iter().enumerate() {
+            if i < 200 || i >= 2200 { continue; }
+            let d = std::f64::consts::PI / 180.0;
+            let want = gyroflow_core::gyro_source::Quat64::from_euler_angles(intended[i][0] * d, intended[i][1] * d, intended[i][2] * d);
+            let e = (want.inverse() * q).euler_angles();
+            sum[0] += (e.0 / d).powi(2);
+            sum[2] += (e.2 / d).powi(2);
+            if (1000..1400).contains(&i) { lag = lag.max((e.1 / d).abs()); }
+            n += 1.0;
+        }
+        [(sum[0] / n).sqrt(), lag, (sum[2] / n).sqrt()]
+    }
+
+    #[test]
+    fn effects_saved_before_the_styles_smooth_as_before() {
+        // No style parameters: the classic algorithm with Gyroflow's defaults
+        let mut smoothing = gyroflow_core::smoothing::Smoothing::default();
+        let before = smoothing.current().get_checksum();
+        GyroflowPluginBaseInstance::configure_smoothing(&params(), &mut smoothing);
+        assert_eq!(smoothing.current().get_name(), "Default");
+        assert_eq!(smoothing.current().get_checksum(), before);
+    }
+
+    #[test]
+    fn styles_set_up_the_optimal_path_per_axis() {
+        for preset in 0..STAB_PRESETS.len() as i32 {
+            let params = styled(preset);
+            let mut smoothing = gyroflow_core::smoothing::Smoothing::default();
+            GyroflowPluginBaseInstance::configure_smoothing(&params, &mut smoothing);
+            let alg = smoothing.current();
+            let p = &STAB_PRESETS[preset as usize];
+            assert_eq!(alg.get_name(), "Optimal path");
+            assert_eq!(alg.get_parameter("max_time_constant"), p.time_constant);
+            assert_eq!(alg.get_parameter("order_2"), p.inertia);
+            assert_eq!(alg.get_parameter("per_axis") > 0.5, p.axes != [100.0; 3]);
+            assert!((alg.get_parameter("smoothness_yaw") - p.smoothness / 100.0 * p.axes[1] / 100.0).abs() < 1e-12);
+            assert_eq!(GyroflowPluginBaseInstance::zoom_window(&params), if p.zoom_mode == ZOOM_STATIC { -1.0 } else { p.zoom_window });
+        }
+    }
+
+    #[test]
+    fn styles_take_the_steps_out_and_keep_the_pan() {
+        let classic = smoothing_error(&params());
+        let micro = smoothing_error(&styled(0));
+        let cinema = smoothing_error(&styled(2));
+        let crane = smoothing_error(&styled(3));
+        eprintln!("Pitch RMS / pan lag / roll RMS (°) · classic {classic:.3?} · micro {micro:.3?} · cinema {cinema:.3?} · crane {crane:.3?}");
+        // Unsmoothed, the bob and the tremor are 0.72° RMS on the pitch
+        assert!(cinema[0] < 0.05 && crane[0] < 0.05, "steps left on the pitch");
+        // Cinematografico follows a steady pan closer than the classic algorithm, Crane eases into it over about a second
+        assert!(cinema[1] < classic[1] / 3.0, "the pan lags");
+        assert!(crane[1] < 1.5, "the pan lags");
+        // Micromosso takes the tremor out and leaves the walk
+        assert!(micro[0] > 0.4 && micro[2] < 0.05);
+    }
+
+    #[test]
+    fn advanced_edits_away_from_a_style_make_it_custom() {
+        let cache = cache();
+        let mut params = styled(2);
+        let (mut inst, _) = loaded(&mut params, &cache, true);
+        // The value the style wrote, reported as an edit: still the style
+        inst.param_changed(&mut params, &cache, Params::SmoothYaw, true).unwrap();
+        assert_eq!(params.get_i32(Params::StabPreset).unwrap(), 2);
+        params.f64s.insert(Params::SmoothYaw, 50.0);
+        inst.param_changed(&mut params, &cache, Params::SmoothYaw, true).unwrap();
+        assert_eq!(params.get_i32(Params::StabPreset).unwrap(), PRESET_CUSTOM);
+        // Picking a style writes it
+        params.i32s.insert(Params::StabPreset, 3);
+        inst.param_changed(&mut params, &cache, Params::StabPreset, true).unwrap();
+        assert_eq!(params.get_f64(Params::HorizonLockAmount).unwrap(), 100.0);
+        assert_eq!(params.get_i32(Params::ZoomMode).unwrap(), ZOOM_STATIC);
+        let stab = inst.managers.peek(&GyroflowPluginBaseInstance::stab_key(&params).unwrap()).unwrap().clone();
+        assert_eq!(stab.smoothing.read().current().get_parameter("order_2"), STAB_PRESETS[3].inertia);
+        assert_eq!(stab.params.read().adaptive_zoom_window, -1.0);
+    }
+
+    #[test]
+    fn a_copy_with_another_style_forks_the_stabilization() {
+        let cache = cache();
+        let mut params_a = styled(2);
+        let (_a, stab) = loaded(&mut params_a, &cache, true);
+        let mut params_b = params_a.clone();
+        GyroflowPluginBaseInstance::write_preset(&mut params_b, &STAB_PRESETS[0]).unwrap();
+        let mut b = GyroflowPluginBaseInstance::default();
+        assert!(!b.agrees_with(&params_b, &stab, (0, 0)));
+        assert!(b.agrees_with(&params_a, &stab, (0, 0)));
     }
 
     #[test]
