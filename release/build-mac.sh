@@ -46,13 +46,20 @@ mkdir -p "$(dirname "$bin")" "$bundle/Contents/Resources"
 cp "$CARGO_TARGET_DIR/release/libgyroflow_ofx.dylib" "$bin"
 cp release/Info.plist "$bundle/Contents/"
 cp LICENSE "$bundle/Contents/Resources/GPL-3.txt"
+# Icone degli effetti: OFX le cerca come <identificativo plugin>.png/.svg in Resources.
+cp assets/icons/it.mecena.motion.*.png assets/icons/it.mecena.motion.*.svg "$bundle/Contents/Resources/"
 for dep in $(otool -L "$bin" | tail -n +2 | awk '{print $1}'); do
     case "$dep" in /System/Library/*|/usr/lib/*) ;; *)
         # A linked dylib lists itself as LC_ID_DYLIB; that entry is not a dependency.
         [[ "$dep" == "$(otool -D "$bin" | tail -1)" ]] || { echo "Dipendenza esterna: $dep"; exit 2; }
     esac
 done
-codesign --force --sign - "$bundle"
+# Con MECENA_APP_SIGN="Developer ID Application: …" il bundle è firmato per la notarizzazione.
+if [[ -n "${MECENA_APP_SIGN:-}" ]]; then
+    codesign --force --options runtime --timestamp --sign "$MECENA_APP_SIGN" "$bundle"
+else
+    codesign --force --sign - "$bundle"
+fi
 codesign --verify --strict "$bundle"
 c++ -std=c++17 -O2 -I SDK tests/bundle.cpp -o "$target_dir/check"
 "$target_dir/check" "$bin"
@@ -63,4 +70,7 @@ c++ -std=c++17 -O3 -DTEST_PACKAGED_OFX -I SDK -I src tests/cinema.cpp -o "$targe
 mkdir -p dist
 c++ -std=c++17 -O3 -fobjc-arc -I src src/shutter_metal.mm tests/metal_benchmark.mm -framework Metal -framework Foundation -o "$target_dir/metal-check"
 "$target_dir/metal-check" | tee dist/Shutter-Metal.txt
-ditto -c -k --keepParent "$bundle" "dist/MecenaMotion-0.10.0-$(uname -m).zip"
+version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" release/Info.plist)
+ditto -c -k --keepParent "$bundle" "dist/MecenaMotion-$version-$(uname -m).zip"
+bash release/make-pkg.sh "$bundle" "$version" dist
+cp "release/installer/Disinstalla Mecena Motion.command" dist/

@@ -12,4 +12,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MecenaMotion-macOS
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.pkg
+            dist/*.command

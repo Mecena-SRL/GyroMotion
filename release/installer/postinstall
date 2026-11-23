@@ -1,0 +1,5 @@
+#!/bin/bash
+bundle="/Library/OFX/Plugins/MecenaMotion.ofx.bundle"
+xattr -dr com.apple.quarantine "$bundle" 2>/dev/null
+chmod -R go-w "$bundle"
+exit 0
