@@ -50,6 +50,7 @@ define_params!(ParamHandler {
         DontDrawOutside       => dont_draw_outside:       ParamHandle<bool>,
         IncludeProjectData    => include_project_data:    ParamHandle<bool>,
         UseGyroflowsKeyframes => use_gyroflows_keyframes: ParamHandle<bool>,
+        CropConstraint        => crop_constraint:         ParamHandle<bool>,
     ],
     f64s: [
         InputRotation         => input_rotation:           ParamHandle<Double>,
@@ -67,11 +68,22 @@ define_params!(ParamHandler {
         VideoSpeed            => video_speed:              ParamHandle<Double>,
         OutputWidth           => output_width:             ParamHandle<Double>,
         OutputHeight          => output_height:            ParamHandle<Double>,
+        SmoothPitch           => smooth_pitch:             ParamHandle<Double>,
+        SmoothYaw             => smooth_yaw:               ParamHandle<Double>,
+        SmoothRoll            => smooth_roll:              ParamHandle<Double>,
+        TimeConstant          => time_constant:            ParamHandle<Double>,
+        FastTimeConstant      => fast_time_constant:       ParamHandle<Double>,
+        MotionInertia         => motion_inertia:           ParamHandle<Double>,
+        MotionBrake           => motion_brake:             ParamHandle<Double>,
+        ZoomWindow            => zoom_window:              ParamHandle<Double>,
         //FusionStartFrame      => fusion_start_frame:       ParamHandle<Double>,
     ],
     i32s: [
         Interpolation         => interpolation:            ParamHandle<Int>,
         IntegrationMethod     => integration_method:       ParamHandle<Int>,
+        StabPreset            => stab_preset:              ParamHandle<Int>,
+        SmoothingMethod       => smoothing_method:         ParamHandle<Int>,
+        ZoomMode              => zoom_mode:                ParamHandle<Int>,
     ],
 
     get_string:  _s p    { Ok(p.get_value()?) },
@@ -465,6 +477,18 @@ impl Execute for GyroflowPlugin {
                         output_size_fit:          param_set.parameter("OutputSizeToTimeline")?,
                         interpolation:            param_set.parameter("Interpolation")?,
                         integration_method:       param_set.parameter("IntegrationMethod")?,
+                        stab_preset:              param_set.parameter("StabPreset")?,
+                        smoothing_method:         param_set.parameter("SmoothingMethod")?,
+                        zoom_mode:                param_set.parameter("ZoomMode")?,
+                        crop_constraint:          param_set.parameter("CropConstraint")?,
+                        smooth_pitch:             param_set.parameter("SmoothPitch")?,
+                        smooth_yaw:               param_set.parameter("SmoothYaw")?,
+                        smooth_roll:              param_set.parameter("SmoothRoll")?,
+                        time_constant:            param_set.parameter("TimeConstant")?,
+                        fast_time_constant:       param_set.parameter("FastTimeConstant")?,
+                        motion_inertia:           param_set.parameter("MotionInertia")?,
+                        motion_brake:             param_set.parameter("MotionBrake")?,
+                        zoom_window:              param_set.parameter("ZoomWindow")?,
 
                         loaded_project:           param_set.parameter("LoadedProject")?,
                         loaded_lens:              param_set.parameter("LoadedLens")?,
@@ -498,8 +522,15 @@ impl Execute for GyroflowPlugin {
                     },
                 };
                 let mut instance_id = instance_data.params.get_string(Params::InstanceId).unwrap_or_default();
+                // A new effect, rather than one restored with a project or copied: it starts with the default style.
+                // The parameter's own default is "Personalizzato", which keeps the effects saved before the styles as they were
+                let new_instance = instance_id.is_empty();
                 instance_data.plugin.initialize_instance_id(&mut instance_id);
                 let _ = instance_data.params.set_string(Params::InstanceId, &instance_id);
+                if new_instance {
+                    let _ = GyroflowPluginBaseInstance::write_preset(&mut instance_data.params, &STAB_PRESETS[DEFAULT_PRESET as usize]);
+                    let _ = instance_data.params.set_i32(Params::StabPreset, DEFAULT_PRESET);
+                }
 
                 let props: EffectInstance = effect.properties()?;
                 if matches!(props.get_resolve_page().as_deref(), Ok("Edit") | Ok("Color")) {
