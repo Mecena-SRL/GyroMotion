@@ -170,6 +170,9 @@ impl Execute for GyroflowPlugin {
 
                 let time = in_args.get_time()?;
                 let master = effect.parameter_set()?.parameter::<Double>("Master")?.get_value_at_time(time)?.clamp(0.0, 100.0) / 100.0;
+                // Sorgente movimento: 0 database, collegamenti e file; 1 solo il file della clip
+                let use_clip_db = effect.parameter_set()?.parameter::<Int>("MotionSource").and_then(|p| p.get_value()).unwrap_or(0) == 0;
+                let sync_offset = effect.parameter_set()?.parameter::<Double>("SyncOffset").and_then(|p| p.get_value_at_time(time)).unwrap_or(0.0);
                 let instance_data: &mut InstanceData = effect.get_instance_data()?;
 
                 if let Some(path) = instance_data.file_path.take() {
@@ -184,25 +187,30 @@ impl Execute for GyroflowPlugin {
                 // (an adjustment clip) the clip under it in the active timeline map, at this frame
                 {
                     let project_path = instance_data.params.get_string(Params::ProjectPath).unwrap_or_default();
-                    let resolved = if project_path.is_empty() {
+                    let key = format!("{use_clip_db}|{project_path}");
+                    let resolved = if !use_clip_db {
+                        None
+                    } else if project_path.is_empty() {
                         let range = instance_data.source_clip.get_frame_range().ok().map(|r| (r.min, r.max));
                         clipdb::resolve_timeline(time, range)
-                    } else if instance_data.clip_db_key == project_path {
+                    } else if instance_data.clip_db_key == key {
                         instance_data.clip_db.clone()
                     } else {
                         clipdb::resolve_media(&project_path)
                     };
                     let report = resolved.as_ref().map(|r| r.report.clone());
                     let previous = instance_data.clip_db.as_ref().map(|r| r.report.clone());
-                    instance_data.clip_db_key = project_path;
+                    instance_data.clip_db_key = key;
                     instance_data.clip_db = resolved;
-                    if let Some(report) = report.filter(|r| previous.as_ref() != Some(r)) {
-                        let _ = instance_data.params.set_string(Params::ClipReport, &report);
+                    if report != previous {
+                        let text = report.unwrap_or_else(|| "Dati dal file della clip (rileggi con «Leggi dati clip» per il riepilogo)".into());
+                        let _ = instance_data.params.set_string(Params::ClipReport, &text);
                     }
                 }
                 let db_source_frame = instance_data.clip_db.as_ref().and_then(|r| r.source_frame);
                 // A file from an external recorder runs on the motion data of the internal clip recorded with it
-                let db_frame_offset = instance_data.clip_db.as_ref().map(|r| r.frame_offset).filter(|o| *o != 0.0);
+                // plus the manual sync correction, which applies to every source
+                let db_frame_offset = Some(instance_data.clip_db.as_ref().map(|r| r.frame_offset).unwrap_or_default() + sync_offset).filter(|o| *o != 0.0);
 
 
 
@@ -595,13 +603,14 @@ impl Execute for GyroflowPlugin {
                 if name == "LoadCurrent" || name == "Source" {
                     let props: EffectInstance = effect.properties()?;
                     let source = props.get_src_file_path().ok().filter(|p| !p.is_empty());
+                    let use_clip_db = effect.parameter_set()?.parameter::<Int>("MotionSource").and_then(|p| p.get_value()).unwrap_or(0) == 0;
                     let data: &mut InstanceData = effect.get_instance_data()?;
                     let previous = data.params.get_string(Params::ProjectPath).unwrap_or_default();
                     if name == "LoadCurrent" || source.as_deref() != Some(previous.as_str()) {
                         data.file_path = None;
                         // Looked up again: the database may have been scanned since
-                        data.clip_db = source.as_deref().and_then(clipdb::resolve_media);
-                        data.clip_db_key = source.clone().unwrap_or_default();
+                        data.clip_db = source.as_deref().filter(|_| use_clip_db).and_then(clipdb::resolve_media);
+                        data.clip_db_key = format!("{use_clip_db}|{}", source.as_deref().unwrap_or(""));
                         data.plugin.clear_stab(&self.gyroflow_plugin.manager_cache);
                         data.params.set_string(Params::ProjectData, "").map_err(|_| Error::InvalidAction)?;
                         data.params.set_string(Params::EmbeddedLensProfile, "").map_err(|_| Error::InvalidAction)?;
