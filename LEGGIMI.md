@@ -1,12 +1,12 @@
-# Mécena Motion 0.10.0
+# Mécena Motion 0.11.0
 
 Due effetti OpenFX per DaVinci Resolve su Mac. **Mecena Stabilize** stabilizza tramite Gyroflow integrato. **Mecena Shutter** ricostruisce il mosso dall’immagine che riceve. Puoi usare Shutter da solo oppure dopo la stabilizzazione.
 
 ## Installazione sul Mac
 
 1. Estrai l’archivio sorgenti e apri la cartella **Motion0100**. Da Terminale puoi scrivere `bash `, trascinare **release/build-mac.sh** nella finestra e premere Invio. Servono Rust, gli strumenti da riga di comando di Xcode e Internet solo sulla macchina che compila. La build scarica le dipendenze bloccate e incorpora il catalogo degli obiettivi.
-2. In **Motion0100/dist** trovi **MecenaMotion-0.10.0.pkg**. Chiudi Resolve, apri il pkg e segui l’installer: copia **MecenaMotion.ofx.bundle** in **/Library/OFX/Plugins/** e sostituisce la versione precedente. Riavvia Resolve. Gli effetti compaiono in Effects → OpenFX → **Mecena Motion**, ciascuno con la propria icona.
-3. Per rimuoverli apri **Disinstalla Mecena Motion.command** nella stessa cartella. In alternativa resta **MecenaMotion-0.10.0-arm64.zip** con il solo bundle da copiare a mano.
+2. In **Motion0100/dist** trovi **MecenaMotion-0.11.0.pkg**. Chiudi Resolve, apri il pkg e segui l’installer: copia **MecenaMotion.ofx.bundle** in **/Library/OFX/Plugins/** e sostituisce la versione precedente. Riavvia Resolve. Gli effetti compaiono in Effects → OpenFX → **Mecena Motion**, ciascuno con la propria icona.
+3. Per rimuoverli apri **Disinstalla Mecena Motion.command** nella stessa cartella. In alternativa resta **MecenaMotion-0.11.0-arm64.zip** con il solo bundle da copiare a mano.
 
 Senza firma Apple, al primo avvio del pkg macOS può bloccarlo: clic destro → Apri, oppure Impostazioni di Sistema → Privacy e sicurezza → Apri comunque. Per distribuire un pkg firmato e notarizzato imposta prima della build `MECENA_APP_SIGN` (certificato “Developer ID Application”), `MECENA_INSTALLER_SIGN` (“Developer ID Installer”) e `MECENA_NOTARY_PROFILE` (profilo creato con `xcrun notarytool store-credentials`). Le icone sorgenti sono in **assets/icons**; `node assets/icons/render.js` rigenera i PNG.
 
