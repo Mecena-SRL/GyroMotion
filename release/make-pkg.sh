@@ -15,11 +15,14 @@ install -m 755 "$here/installer/preinstall" "$here/installer/postinstall" "$work
 cp "$here/installer/"*.html "$work/res/"
 cp "$here/../LICENSE" "$work/res/LICENSE.txt"
 # Il bundle va sempre in /Library/OFX/Plugins, anche se esiste una copia altrove.
-# pkgbuild può non riconoscere .ofx.bundle come componente: in quel caso non c'è nulla da rilocare.
 pkgbuild --analyze --root "$work/root" "$work/components.plist"
-if /usr/libexec/PlistBuddy -c "Print :0" "$work/components.plist" >/dev/null 2>&1; then
-    /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$work/components.plist"
-fi
+pb=/usr/libexec/PlistBuddy
+i=0
+while $pb -c "Print :$i" "$work/components.plist" >/dev/null 2>&1; do
+    $pb -c "Delete :$i:BundleIsRelocatable" "$work/components.plist" >/dev/null 2>&1 || true
+    $pb -c "Add :$i:BundleIsRelocatable bool false" "$work/components.plist"
+    i=$((i+1))
+done
 pkgbuild --root "$work/root" --install-location / --component-plist "$work/components.plist" \
     --scripts "$work/scripts" --identifier it.mecena.motion.pkg --version "$version" \
     "$work/MecenaMotion-core.pkg"
