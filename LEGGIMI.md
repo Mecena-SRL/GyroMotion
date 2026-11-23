@@ -1,12 +1,14 @@
-# Mécena Motion 0.10.0
+# Mécena Motion 0.11.0
 
 Due effetti OpenFX per DaVinci Resolve su Mac. **Mecena Stabilize** stabilizza tramite Gyroflow integrato. **Mecena Shutter** ricostruisce il mosso dall’immagine che riceve. Puoi usare Shutter da solo oppure dopo la stabilizzazione.
 
 ## Installazione sul Mac
 
 1. Estrai l’archivio sorgenti e apri la cartella **Motion0100**. Da Terminale puoi scrivere `bash `, trascinare **release/build-mac.sh** nella finestra e premere Invio. Servono Rust, gli strumenti da riga di comando di Xcode e Internet solo sulla macchina che compila. La build scarica le dipendenze bloccate e incorpora il catalogo degli obiettivi.
-2. In **Motion0100/dist** apri **MecenaMotion-0.10.0-arm64.zip** su Apple Silicon. Al suo interno trovi **MecenaMotion.ofx.bundle**.
-3. Chiudi Resolve e colloca il bundle in **/Library/OFX/Plugins/**, sostituendo la precedente copia di MecenaMotion. Riavvia Resolve. Per usare gli effetti sul Mac di montaggio basta il bundle.
+2. In **Motion0100/dist** trovi **MecenaMotion-0.11.0.pkg**. Chiudi Resolve, apri il pkg e segui l’installer: copia **MecenaMotion.ofx.bundle** in **/Library/OFX/Plugins/** e sostituisce la versione precedente. Riavvia Resolve. Gli effetti compaiono in Effects → OpenFX → **Mecena Motion**, ciascuno con la propria icona.
+3. Per rimuoverli apri **Disinstalla Mecena Motion.command** nella stessa cartella. In alternativa resta **MecenaMotion-0.11.0-arm64.zip** con il solo bundle da copiare a mano.
+
+Senza firma Apple, al primo avvio del pkg macOS può bloccarlo: clic destro → Apri, oppure Impostazioni di Sistema → Privacy e sicurezza → Apri comunque. Per distribuire un pkg firmato e notarizzato imposta prima della build `MECENA_APP_SIGN` (certificato “Developer ID Application”), `MECENA_INSTALLER_SIGN` (“Developer ID Installer”) e `MECENA_NOTARY_PROFILE` (profilo creato con `xcrun notarytool store-credentials`). Le icone sorgenti sono in **assets/icons**; `node assets/icons/render.js` rigenera i PNG.
 
 ## Il tuo caso da 50p a 25p
 
@@ -101,7 +103,7 @@ Un collegamento manuale non viene sovrascritto dallo script. I proxy di Resolve 
 
 **Regolazioni avanzate → Sorgente movimento.** **Automatica** è la scelta predefinita e usa, in quest’ordine, il database, i collegamenti per timecode e il file della clip. **Solo file della clip** ignora il database e legge sempre la telemetria dall’originale. **Offset sincronismo (frame)** sposta i dati movimento rispetto all’immagine, in frame della clip che li ha registrati. Si somma all’offset del collegamento, vale per ogni sorgente e accetta keyframe.
 
-**Adjustment clip su tutta la timeline.** Copia `Mecena ClipDB.py` (anch’esso in Resources) in `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/`. Con la timeline aperta lancia **Workspace → Scripts → Mecena ClipDB**. Lo script aggiorna il database con gli originali raggiungibili e scrive in **timelines/** la mappa che associa ogni frame di timeline a una clip, al frame sorgente e alla velocità. La mappa diventa quella attiva. Mecena Stabilize su un adjustment clip legge, frame per frame, la clip visibile più in alto e la stabilizza con i suoi dati. Con più adjustment clip li distingue per durata. Dopo ogni modifica al montaggio rilancia lo script. Limiti: le speed ramp a velocità variabile non vengono seguite (la velocità costante sì), e le clip ridimensionate o riposizionate sotto l’adjustment clip ricevono una correzione pensata per il quadro intero. Il caso d’uso previsto è una timeline di proxy o originali a quadro pieno.
+**Adjustment clip su tutta la timeline.** L’installer pkg copia `Mecena ClipDB.py` in `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/` e collega `mecena-clipdb` in `/usr/local/bin`. Con il solo zip copia lo script a mano da Resources. Con la timeline aperta lancia **Workspace → Scripts → Mecena ClipDB**. Lo script aggiorna il database con gli originali raggiungibili e scrive in **timelines/** la mappa che associa ogni frame di timeline a una clip, al frame sorgente e alla velocità. La mappa diventa quella attiva. Mecena Stabilize su un adjustment clip legge, frame per frame, la clip visibile più in alto e la stabilizza con i suoi dati. Con più adjustment clip li distingue per durata. Dopo ogni modifica al montaggio rilancia lo script. Limiti: le speed ramp a velocità variabile non vengono seguite (la velocità costante sì), e le clip ridimensionate o riposizionate sotto l’adjustment clip ricevono una correzione pensata per il quadro intero. Il caso d’uso previsto è una timeline di proxy o originali a quadro pieno.
 
 ## Uso previsto in Edit e Color
 

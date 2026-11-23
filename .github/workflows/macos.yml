@@ -1,10 +1,18 @@
 name: Build standalone macOS OFX
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Pubblica una release GitHub (tag v<versione di Info.plist>) con pkg, zip e disinstallatore"
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   arm64:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
@@ -12,4 +20,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MecenaMotion-macOS
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.pkg
+            dist/*.command
+      - name: Release
+        if: ${{ inputs.release && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" release/Info.plist)
+          notes="release/notes/$version.md"
+          [[ -f "$notes" ]] || notes=/dev/null
+          gh release create "v$version" --target "$GITHUB_SHA" --title "Mecena Motion $version" \
+            --notes-file "$notes" dist/*.pkg dist/*.zip dist/*.command
