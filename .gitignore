@@ -2,3 +2,5 @@
 /dist/
 /target/
 *.ofx.bundle/
+/fcp/build/
+/fcp/MecenaMotion.xcodeproj/

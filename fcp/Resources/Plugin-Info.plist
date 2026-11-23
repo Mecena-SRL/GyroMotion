@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key><string>en</string>
+	<key>CFBundleDisplayName</key><string>Mecena Motion FxPlug</string>
+	<key>CFBundleExecutable</key><string>MecenaMotionPlugin</string>
+	<key>CFBundleIdentifier</key><string>it.mecena.motion.fcp.Plugin</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleName</key><string>MecenaMotionPlugin</string>
+	<key>CFBundlePackageType</key><string>XPC!</string>
+	<key>CFBundleShortVersionString</key><string>0.1.0</string>
+	<key>CFBundleVersion</key><string>1</string>
+	<key>NSHumanReadableCopyright</key><string>GPL-3.0-or-later</string>
+	<key>PlugInKit</key>
+	<dict>
+		<key>Attributes</key>
+		<dict>
+			<key>com.apple.protocol</key><string>FxPlug</string>
+			<key>com.apple.version</key><string>1.1</string>
+		</dict>
+		<key>PrincipalClass</key><string>FxPrincipal</string>
+		<key>Protocol</key><string>PROXPCProtocol</string>
+		<key>Subsystems</key>
+		<array><string>NSViewService_PKSubsystem</string></array>
+	</dict>
+	<key>ProPlugDictionaryVersion</key><string>1.0</string>
+	<key>ProPlugDynamicRegistration</key><false/>
+	<key>ProPlugPlugInGroupList</key>
+	<array>
+		<dict>
+			<key>groupName</key><string>Mecena Motion</string>
+			<key>uuid</key><string>F045B86D-7863-47BD-B566-550F4F08DE8D</string>
+		</dict>
+	</array>
+	<key>ProPlugPlugInList</key>
+	<array>
+		<dict>
+			<key>className</key><string>MecenaStabilizePlugIn</string>
+			<key>displayName</key><string>Mecena Stabilize</string>
+			<key>group</key><string>F045B86D-7863-47BD-B566-550F4F08DE8D</string>
+			<key>infoString</key><string>Stabilizzazione dai dati giroscopici della camera, con modalità semplici.</string>
+			<key>protocolNames</key>
+			<array><string>FxFilter</string></array>
+			<key>uuid</key><string>1FCB868F-F3C1-46DD-8C8D-C4F8E22404EE</string>
+			<key>version</key><string>1.0</string>
+		</dict>
+	</array>
+	<key>XPCService</key>
+	<dict>
+		<key>ServiceType</key><string>Application</string>
+		<key>JoinExistingSession</key><true/>
+		<key>RunLoopType</key><string>_NSApplicationMain</string>
+		<key>_AdditionalSubServices</key>
+		<dict><key>viewbridge</key><true/></dict>
+	</dict>
+</dict>
+</plist>

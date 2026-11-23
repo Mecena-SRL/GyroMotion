@@ -31,6 +31,7 @@ pub enum Params {
     OpenRecentProject,
     Status, ClipReport,
     AdjustGroup, AdjustGroupEnd,
+    Mode,
     Fov,
     Smoothness,
     ZoomLimit,
@@ -355,6 +356,96 @@ impl GyroflowPluginBase {
         }
     }
 
+    /// The stabilization modes of the panel, in the order of the Mode choice
+    pub const MODES: [&'static str; 7] = ["Treppiede", "Cinematografica", "Bilanciata", "A mano naturale",
+                                          "Solo orizzonte dritto", "Solo correzione ottica", "Personalizzata"];
+    pub const MODE_CUSTOM: i32 = 6;
+    /// Smoothness and horizon lock (%) a mode sets the advanced sliders to; None for Personalizzata
+    pub fn mode_values(mode: i32) -> Option<(f64, f64)> {
+        match mode {
+            0 => Some((50.0, 100.0)),   // Fixed camera: smoothness unused
+            1 => Some((100.0, 100.0)),
+            2 => Some((50.0, 0.0)),
+            3 => Some((20.0, 0.0)),
+            4 => Some((50.0, 100.0)),   // No smoothing: smoothness unused
+            5 => Some((50.0, 0.0)),
+            _ => None,
+        }
+    }
+    /// The smoothing algorithm of `mode` on `stab` (Gyroflow's: 0 none, 1 default, 3 plain, 4 fixed camera). The caller
+    /// invalidates the smoothing
+    pub fn apply_mode(params: &dyn GyroflowPluginParams, stab: &StabilizationManager) {
+        let mode = params.get_i32(Params::Mode).unwrap_or(2);
+        let tripod = if mode == 0 { Self::tripod_angles(&stab.gyro.read().quaternions) } else { None };
+        let mut smooth = stab.smoothing.write();
+        match mode {
+            0 => match tripod {
+                Some((roll, pitch, yaw)) => {
+                    smooth.set_current(4);
+                    smooth.current_mut().set_parameter("roll", roll);
+                    smooth.current_mut().set_parameter("pitch", pitch);
+                    smooth.current_mut().set_parameter("yaw", yaw);
+                }
+                None => {   // no motion data yet, or an orientation the angles can't express: a very slow plain smoothing
+                    smooth.set_current(3);
+                    smooth.current_mut().set_parameter("time_constant", 10.0);
+                }
+            },
+            1 => { smooth.set_current(1); smooth.current_mut().set_parameter("max_smoothness", 3.0); }
+            4 | 5 => smooth.set_current(0),
+            _ => { smooth.set_current(1); smooth.current_mut().set_parameter("max_smoothness", 1.0); }
+        }
+        log::info!("Modalità {mode}: {}", smooth.current().get_name());
+    }
+    /// Whether `stab` smooths with the algorithm of the instance's mode (see `apply_mode`)
+    fn mode_agrees(params: &dyn GyroflowPluginParams, stab: &StabilizationManager) -> bool {
+        let name = stab.smoothing.read().current().get_name();
+        match params.get_i32(Params::Mode).unwrap_or(2) {
+            0 => name == "Fixed camera" || name.starts_with("Plain"),
+            4 | 5 => name == "No smoothing",
+            _ => name == "Default",
+        }
+    }
+    /// Roll, pitch and yaw (degrees) of Gyroflow's fixed camera that hold the clip's mean orientation: a tripod. None
+    /// without motion data, or when the angles don't give that orientation back (near ±90° pitch)
+    pub fn tripod_angles(quats: &gyroflow_core::gyro_source::TimeQuat) -> Option<(f64, f64, f64)> {
+        type M3 = [[f64; 3]; 3];
+        fn mul(a: &M3, b: &M3) -> M3 {
+            let mut r = [[0.0; 3]; 3];
+            for i in 0..3 { for j in 0..3 { for k in 0..3 { r[i][j] += a[i][k] * b[k][j]; } } }
+            r
+        }
+        let rx = |a: f64| -> M3 { let (s, c) = a.sin_cos(); [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]] };
+        let ry = |a: f64| -> M3 { let (s, c) = a.sin_cos(); [[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]] };
+        let rz = |a: f64| -> M3 { let (s, c) = a.sin_cos(); [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]] };
+        // Mean orientation: the quaternions' sum, all in the first one's hemisphere (coords are i, j, k, w)
+        let first = quats.values().next()?.coords;
+        let mut acc = [0.0f64; 4];
+        for q in quats.values() {
+            let sign = if q.coords.dot(&first) < 0.0 { -1.0 } else { 1.0 };
+            for i in 0..4 { acc[i] += sign * q.coords[i]; }
+        }
+        let n = acc.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if !(n > 1e-9) { return None; }
+        let (x, y, z, w) = (acc[0] / n, acc[1] / n, acc[2] / n, acc[3] / n);
+        let r: M3 = [[1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
+                     [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
+                     [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)]];
+        // Gyroflow's Fixed camera: Rz(yaw) * Rx(pitch) * Ry(roll + 90°) * C, C = Rz(90°) * Ry(90°)
+        let d2r = std::f64::consts::PI / 180.0;
+        let c = mul(&rz(90.0 * d2r), &ry(90.0 * d2r));
+        let ct = [[c[0][0], c[1][0], c[2][0]], [c[0][1], c[1][1], c[2][1]], [c[0][2], c[1][2], c[2][2]]];
+        let m = mul(&r, &ct);
+        let pitch = m[2][1].clamp(-1.0, 1.0).asin();
+        let roll90 = (-m[2][0]).atan2(m[2][2]);
+        let yaw = (-m[0][1]).atan2(m[1][1]);
+        let back = mul(&mul(&mul(&rz(yaw), &rx(pitch)), &ry(roll90)), &c);
+        let err = (0..9).map(|i| (back[i / 3][i % 3] - r[i / 3][i % 3]).abs()).fold(0.0, f64::max);
+        if !err.is_finite() || err > 0.004 { log::warn!("Treppiede: angoli non affidabili (errore {err})"); return None; }
+        let wrap = |a: f64| (a + 180.0).rem_euclid(360.0) - 180.0;
+        Some((wrap(roll90 / d2r - 90.0), pitch / d2r, yaw / d2r))
+    }
+
     pub fn get_param_definitions() -> [ParameterType; 8] {
         [
             ParameterType::HiddenString { id: "InstanceId" },
@@ -373,21 +464,22 @@ impl GyroflowPluginBase {
                 ParameterType::Button  { id: "OpenRecentProject", label: "Last saved project",       hint: "Load most recently saved project in the Gyroflow app" },
             ] },
             ParameterType::Group { id: "AdjustGroup", label: "Stabilizzazione", opened: true, parameters: vec![
-                ParameterType::Slider { id: "Master", label: "MASTER (%)", hint: "Anima la quantità di stabilizzazione tra 0 e 100.", min: 0.0, max: 100.0, default: 100.0 },
-                ParameterType::Slider   { id: "Smoothness",             label: "Fluidità massima", hint: "Verso sinistra conservi la mano. Verso destra attenui maggiormente le oscillazioni.",                   min: 1.0,    max: 300.0, default: 50.0 },
-                ParameterType::Slider   { id: "ZoomLimit",              label: "Crop massimo (zoom %)", hint: "100% corrisponde alla scala originale. 110% permette uno zoom fino a 1,10×.",                   min: 51.0,   max: 300.0, default: 130.0 },
-                ParameterType::Slider   { id: "HorizonLockAmount",      label: "Blocco orizzonte (%)",         hint: "0 segue la camera. 100 punta a mantenere l’orizzonte in piano.",          min: 0.0,    max: 100.0, default: 0.0 },
-                ParameterType::Group { id: "MotionFine", label: "Regolazioni avanzate", opened: false, parameters: vec![
-                ParameterType::Slider   { id: "LensCorrectionStrength", label: "Lens correction",      hint: "Lens correction",              min: 0.0,    max: 100.0, default: 100.0 },
-                ParameterType::Slider   { id: "HorizonLockRoll",        label: "Horizon roll",         hint: "Horizon lock roll adjustment", min: -100.0, max: 100.0, default: 0.0 },
+                ParameterType::Select { id: "Mode", label: "Modalità", hint: "Treppiede: inquadratura ferma come su cavalletto. Cinematografica: movimenti lenti e morbidi, orizzonte dritto. Bilanciata: toglie i tremolii e segue i movimenti. A mano naturale: toglie solo le vibrazioni, tiene il respiro dell'operatore. Solo orizzonte dritto: raddrizza la linea dell'orizzonte e basta. Solo correzione ottica: nessuna stabilizzazione. Personalizzata: usa i valori di Avanzate.", options: GyroflowPluginBase::MODES.to_vec(), default: "Bilanciata" },
+                ParameterType::Slider { id: "Master", label: "Intensità (%)", hint: "Quanto della stabilizzazione applicare: 0 = clip originale, 100 = piena. Animabile.", min: 0.0, max: 100.0, default: 100.0 },
+                ParameterType::Slider   { id: "ZoomLimit",              label: "Zoom massimo (%)", hint: "Quanto può ingrandire per nascondere i bordi. 100 = nessuno zoom (possono vedersi bordi), 130 = fino a 1,3×.",                   min: 51.0,   max: 300.0, default: 130.0 },
+                ParameterType::Group { id: "MotionFine", label: "Avanzate", opened: false, parameters: vec![
+                ParameterType::Slider   { id: "Smoothness",             label: "Fluidità (%)", hint: "Valore della modalità scelta. Cambiandolo la modalità passa a Personalizzata.",                   min: 1.0,    max: 300.0, default: 50.0 },
+                ParameterType::Slider   { id: "HorizonLockAmount",      label: "Orizzonte dritto (%)",         hint: "0 segue la camera, 100 tiene l’orizzonte in piano. Cambiandolo la modalità passa a Personalizzata.",          min: 0.0,    max: 100.0, default: 0.0 },
+                ParameterType::Slider   { id: "LensCorrectionStrength", label: "Correzione ottica (%)", hint: "Correzione della distorsione dell’obiettivo",              min: 0.0,    max: 100.0, default: 100.0 },
+                ParameterType::Slider   { id: "HorizonLockRoll",        label: "Inclinazione orizzonte (°)", hint: "Ruota l’orizzonte bloccato", min: -100.0, max: 100.0, default: 0.0 },
                 //ParameterType::Slider   { id: "PositionX",              label: "Position offset X",    hint: "Position offset X",            min: -100.0, max: 100.0, default: 0.0 },
                 //ParameterType::Slider   { id: "PositionY",              label: "Position offset Y",    hint: "Position offset Y",            min: -100.0, max: 100.0, default: 0.0 },
-                ParameterType::Slider   { id: "AdditionalPitch",        label: "Additional pitch",     hint: "Additional pitch rotation",    min: -180.0, max: 180.0, default: 0.0 },
-                ParameterType::Slider   { id: "AdditionalYaw",          label: "Additional yaw",       hint: "Additional yaw rotation",      min: -180.0, max: 180.0, default: 0.0 },
-                ParameterType::Slider   { id: "Rotation",               label: "Video rotation",       hint: "Video rotation",               min: -360.0, max: 360.0, default: 0.0 },
-                ParameterType::Slider   { id: "InputRotation",          label: "Input rotation",       hint: "Input rotation",               min: -360.0, max: 360.0, default: 0.0 },
-                ParameterType::Slider   { id: "Fov",                    label: "FOV",                  hint: "FOV",                          min: 0.1,    max: 3.0,   default: 1.0 },
-                ParameterType::Slider   { id: "VideoSpeed",             label: "Video speed",          hint: "Use this slider to change video speed or keyframe it, instead of built-in speed changes in the editor", min: 0.0001, max: 1000.0, default: 100.0 },
+                ParameterType::Slider   { id: "AdditionalPitch",        label: "Inclinazione verticale (°)", hint: "Sposta l’inquadratura in alto o in basso",    min: -180.0, max: 180.0, default: 0.0 },
+                ParameterType::Slider   { id: "AdditionalYaw",          label: "Panoramica (°)", hint: "Sposta l’inquadratura a destra o a sinistra",      min: -180.0, max: 180.0, default: 0.0 },
+                ParameterType::Slider   { id: "Rotation",               label: "Rotazione video (°)", hint: "Rotazione del video",               min: -360.0, max: 360.0, default: 0.0 },
+                ParameterType::Slider   { id: "InputRotation",          label: "Rotazione ingresso (°)", hint: "Rotazione applicata dal programma alla clip",               min: -360.0, max: 360.0, default: 0.0 },
+                ParameterType::Slider   { id: "Fov",                    label: "Campo visivo", hint: "Campo visivo di uscita",                          min: 0.1,    max: 3.0,   default: 1.0 },
+                ParameterType::Slider   { id: "VideoSpeed",             label: "Velocità video (%)",   hint: "Use this slider to change video speed or keyframe it, instead of built-in speed changes in the editor", min: 0.0001, max: 1000.0, default: 100.0 },
                 ParameterType::Checkbox { id: "DisableStretch",         label: "Disable Gyroflow's stretch", hint: "If you used Input stretch in the lens profile in Gyroflow, and you de-stretched the video separately in your editor (by setting anamorphic squeeze factor), check this to disable Gyroflow's internal stretching.", default: false },
                 ParameterType::Select   { id: "IntegrationMethod",      label: "Integration method",   hint: "IMU integration method", options: vec!["None", "Complementary", "VQF", "Simple gyro", "Simple gyro + accel", "Mahony", "Madgwick"], default: "VQF" },
                 ParameterType::Button   { id: "SaveDefault",            label: "Save as default",      hint: "Save the current smoothness, zoom limit, lens correction, horizon lock and FOV as the defaults for every newly loaded clip (lens_profiles/default.gyroflow)" },
@@ -879,6 +971,7 @@ impl GyroflowPluginBaseInstance {
     /// may only do to one of its own
     pub fn changes_stabilization(param: Params) -> bool {
         matches!(param,
+            Params::Mode |
             Params::Fov | Params::Smoothness | Params::ZoomLimit | Params::LensCorrectionStrength |
             Params::HorizonLockAmount | Params::HorizonLockRoll | Params::AdditionalPitch | Params::AdditionalYaw |
             Params::Rotation | Params::InputRotation | Params::VideoSpeed | Params::IntegrationMethod |
@@ -932,6 +1025,7 @@ impl GyroflowPluginBaseInstance {
         }
         self.cache_keyframes(params, use_gyroflows_keyframes, self.num_frames, self.fps.max(1.0));
         self.set_keyframe_provider(stab);
+        GyroflowPluginBase::apply_mode(params, stab);
 
         if let Ok(im) = params.get_i32(Params::IntegrationMethod) {
             let mut gyro = stab.gyro.write();
@@ -978,7 +1072,9 @@ impl GyroflowPluginBaseInstance {
         let integration = params.get_i32(Params::IntegrationMethod).map_or(true, |x| stab.gyro.read().integration_method == x as usize);
         let interpolation = stab.stabilization.read().interpolation as u32 == Self::interpolation(params) as u32;
 
-        keyframes && output_size && overview && integration && interpolation
+        let mode = GyroflowPluginBase::mode_agrees(params, stab);
+
+        keyframes && output_size && overview && integration && interpolation && mode
     }
 
     /// Gives the instance a stabilization of its own, under a new instance id, to change from now on. It shared it with
@@ -1192,6 +1288,10 @@ impl GyroflowPluginBaseInstance {
                     params.set_f64(Params::LensCorrectionStrength, (gf_params.lens_correction_amount * 100.0).min(100.0))?;
                     params.set_f64(Params::HorizonLockAmount,      if smooth.horizon_lock.lock_enabled { smooth.horizon_lock.horizonlockpercent } else { 0.0 })?;
                     params.set_f64(Params::HorizonLockRoll,        if smooth.horizon_lock.lock_enabled { smooth.horizon_lock.horizonroll } else { 0.0 })?;
+                    if let Some((smoothness, horizon)) = GyroflowPluginBase::mode_values(params.get_i32(Params::Mode).unwrap_or(2)) {
+                        params.set_f64(Params::Smoothness,        smoothness)?;
+                        params.set_f64(Params::HorizonLockAmount, horizon)?;
+                    }
                     params.set_f64(Params::VideoSpeed,             gf_params.video_speed * 100.0)?;
                     //params.set_f64(Params::PositionX,              gf_params.adaptive_zoom_center_offset.0 * 100.0)?;
                     //params.set_f64(Params::PositionY,              gf_params.adaptive_zoom_center_offset.1 * 100.0)?;
@@ -1434,7 +1534,34 @@ impl GyroflowPluginBaseInstance {
                     v.invalidate_blocking_zooming();
                 }
             }
+            let mode_changed = match param {
+                Params::Mode => {
+                    if let Some((smoothness, horizon)) = GyroflowPluginBase::mode_values(params.get_i32(Params::Mode)?) {
+                        params.set_f64(Params::Smoothness,        smoothness)?;
+                        params.set_f64(Params::HorizonLockAmount, horizon)?;
+                    }
+                    true
+                }
+                // Moving a slider of the mode makes it a custom stabilization
+                Params::Smoothness | Params::HorizonLockAmount if params.get_i32(Params::Mode)? != GyroflowPluginBase::MODE_CUSTOM => {
+                    params.set_i32(Params::Mode, GyroflowPluginBase::MODE_CUSTOM)?;
+                    true
+                }
+                _ => false
+            };
+            if mode_changed {
+                params.set_string(Params::Status, "Calcolo...")?;
+                let use_gyroflows_keyframes = params.get_bool(Params::UseGyroflowsKeyframes).unwrap_or_default();
+                self.cache_keyframes(params, use_gyroflows_keyframes, self.num_frames, self.fps.max(1.0));
+                let managers = self.managers.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>();
+                for v in &managers {
+                    GyroflowPluginBase::apply_mode(params, v);
+                }
+                self.recompute_for(params, Params::Smoothness, use_gyroflows_keyframes);
+                params.set_string(Params::Status, "OK")?;
+            }
             match param {
+                _ if mode_changed => { }
                 Params::Fov | Params::Smoothness | Params::ZoomLimit | Params::LensCorrectionStrength |
                 Params::HorizonLockAmount | Params::HorizonLockRoll |
                 //Params::PositionX | Params::PositionY |

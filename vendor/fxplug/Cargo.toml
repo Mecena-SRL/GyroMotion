@@ -1,0 +1,17 @@
+[package]
+name = "mecena-fxplug"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+edition = "2024"
+description = "Mecena Stabilize for Final Cut Pro: the Gyroflow plugin base behind a C interface for the FxPlug"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+gyroflow-plugin-base = { path = "../common" }
+log = "0.4"
+
+[profile.release]
+codegen-units = 1
+lto = true
