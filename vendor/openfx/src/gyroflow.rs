@@ -113,7 +113,9 @@ struct InstanceData {
     supports_output_size: bool,
     is_fusion_page: bool,
     file_path: Option<String>,
-
+    /// The clip from the clip database (`clipdb`) the instance renders with, and what it was looked up for
+    clip_db: Option<clipdb::Resolved>,
+    clip_db_key: String,
 }
 
 impl InstanceData {
@@ -131,7 +133,13 @@ impl InstanceData {
         let in_size = ((source_rect.x2 - source_rect.x1) as usize, (source_rect.y2 - source_rect.y1) as usize);*/
         let out_size = ((output_rect.x2 - output_rect.x1) as usize, (output_rect.y2 - output_rect.y1) as usize);
 
-        self.plugin.stab_manager(&mut self.params, manager_cache, out_size, loading_pending_video_file).map_err(|e| {
+        let result = if let Some(db) = &self.clip_db {
+            let mut params = ProjectPathOverride { inner: &mut self.params, path: &db.project };
+            self.plugin.stab_manager(&mut params, manager_cache, out_size, loading_pending_video_file)
+        } else {
+            self.plugin.stab_manager(&mut self.params, manager_cache, out_size, loading_pending_video_file)
+        };
+        result.map_err(|e| {
             log::error!("plugin.stab_manager error: {e:?}");
             Error::UnknownError
         })
@@ -159,6 +167,28 @@ impl Execute for GyroflowPlugin {
                         let _ = instance_data.params.set_string(Params::ProjectPath, &new_project_path);
                     }
                 }
+
+                // Clip database: the original's own clip, also offline or played from a proxy; without an original
+                // (an adjustment clip) the clip under it in the active timeline map, at this frame
+                {
+                    let project_path = instance_data.params.get_string(Params::ProjectPath).unwrap_or_default();
+                    let resolved = if project_path.is_empty() {
+                        let range = instance_data.source_clip.get_frame_range().ok().map(|r| (r.min, r.max));
+                        clipdb::resolve_timeline(time, range)
+                    } else if instance_data.clip_db_key == project_path {
+                        instance_data.clip_db.clone()
+                    } else {
+                        clipdb::resolve_media(&project_path)
+                    };
+                    let report = resolved.as_ref().map(|r| r.report.clone());
+                    let previous = instance_data.clip_db.as_ref().map(|r| r.report.clone());
+                    instance_data.clip_db_key = project_path;
+                    instance_data.clip_db = resolved;
+                    if let Some(report) = report.filter(|r| previous.as_ref() != Some(r)) {
+                        let _ = instance_data.params.set_string(Params::ClipReport, &report);
+                    }
+                }
+                let db_source_frame = instance_data.clip_db.as_ref().and_then(|r| r.source_frame);
 
 
 
@@ -212,7 +242,7 @@ impl Execute for GyroflowPlugin {
 
                 // The host may tell which source frame it renders (Resolve does, retimed and conformed clips included): the
                 // timestamps are exact then, whatever the frame rates
-                let src_frame = in_args.get_src_frame().ok();
+                let src_frame = db_source_frame.or_else(|| in_args.get_src_frame().ok().map(|f| f as f64));
 
                 if !has_gyro {
                     instance_data.plugin.set_status(&mut instance_data.params, "Gyro assente", "In Mecena Shutter apri Avanzate e attiva la stabilizzazione ottica.", false);
@@ -237,13 +267,14 @@ impl Execute for GyroflowPlugin {
                     timestamp_us = (frame.floor() * (1_000_000.0 / fps)).round() as i64;
                 }
                 if let Some(frame) = src_frame {
-                    timestamp_us = (frame as f64 * (1_000_000.0 / fps)).round() as i64;
+                    timestamp_us = (frame * (1_000_000.0 / fps)).round() as i64;
                 }
 
                 let source_timestamp_us = params.get_source_timestamp_at_ramped_timestamp(timestamp_us);
                 drop(params);
 
-                if source_timestamp_us != timestamp_us {
+                // On an adjustment clip the input is the timeline's frame, whatever the clip's own time
+                if source_timestamp_us != timestamp_us && db_source_frame.is_none() {
                     time = (source_timestamp_us as f64 / speed_stretch / 1_000_000.0 * src_fps).round();
                     timestamp_us = ((time / src_fps * 1_000_000.0) * speed_stretch).round() as i64;
                     if (src_fps - fps).abs() > 0.01 {
@@ -431,6 +462,8 @@ impl Execute for GyroflowPlugin {
                     supports_output_size: true,
                     is_fusion_page: false,
                     file_path: None,
+                    clip_db: None,
+                    clip_db_key: String::new(),
                     params: ParamHandler {
                         instance_id:              param_set.parameter("InstanceId")?,
                         project_data:             param_set.parameter("ProjectData")?,
@@ -529,12 +562,18 @@ impl Execute for GyroflowPlugin {
                     let previous = data.params.get_string(Params::ProjectPath).unwrap_or_default();
                     if name == "LoadCurrent" || source.as_deref() != Some(previous.as_str()) {
                         data.file_path = None;
+                        // Looked up again: the database may have been scanned since
+                        data.clip_db = source.as_deref().and_then(clipdb::resolve_media);
+                        data.clip_db_key = source.clone().unwrap_or_default();
                         data.plugin.clear_stab(&self.gyroflow_plugin.manager_cache);
                         data.params.set_string(Params::ProjectData, "").map_err(|_| Error::InvalidAction)?;
                         data.params.set_string(Params::EmbeddedLensProfile, "").map_err(|_| Error::InvalidAction)?;
                         data.params.set_string(Params::EmbeddedPreset, "").map_err(|_| Error::InvalidAction)?;
                         data.params.set_string(Params::ProjectPath, source.as_deref().unwrap_or("")).map_err(|_| Error::InvalidAction)?;
                         data.params.set_string(Params::ClipReport, "").map_err(|_| Error::InvalidAction)?;
+                        if let Some(db) = &data.clip_db {
+                            data.params.set_string(Params::ClipReport, &db.report).map_err(|_| Error::InvalidAction)?;
+                        }
                         if source.is_none() {
                             data.plugin.set_status(&mut data.params, "Originale non esposto da Resolve", "La clip corrente non espone un percorso sorgente.", false);
                         } else if name == "LoadCurrent" {

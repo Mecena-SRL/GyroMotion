@@ -11,6 +11,8 @@ pub use gyroflow_core;
 pub use rfd;
 pub use parking_lot;
 pub use lru;
+pub use serde_json;
+pub mod clipdb;
 
 pub type PluginResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -504,6 +506,36 @@ pub trait GyroflowPluginParams {
     fn get_keyframes(&self, param: Params) -> Vec<(TimeType, f64)>;
     fn clear_keyframes(&mut self, param: Params) -> PluginResult<()>;
     fn set_f64_at_time(&mut self, param: Params, time: TimeType, value: f64) -> PluginResult<()>;
+}
+
+/// The parameters with another project in Project path, for a clip from the clip database (`clipdb`): the stabilization
+/// loads and is keyed by it, and the instance's own Project path stays as the user or the host set it
+pub struct ProjectPathOverride<'a> {
+    pub inner: &'a mut dyn GyroflowPluginParams,
+    pub path: &'a str,
+}
+impl GyroflowPluginParams for ProjectPathOverride<'_> {
+    fn set_enabled(&mut self, p: Params, e: bool) -> PluginResult<()> { self.inner.set_enabled(p, e) }
+    fn set_label(&mut self, p: Params, l: &str) -> PluginResult<()> { self.inner.set_label(p, l) }
+    fn set_hint(&mut self, p: Params, h: &str) -> PluginResult<()> { self.inner.set_hint(p, h) }
+    fn set_f64(&mut self, p: Params, v: f64) -> PluginResult<()> { self.inner.set_f64(p, v) }
+    fn get_f64(&self, p: Params) -> PluginResult<f64> { self.inner.get_f64(p) }
+    fn get_f64_at_time(&self, p: Params, t: TimeType) -> PluginResult<f64> { self.inner.get_f64_at_time(p, t) }
+    fn set_bool(&mut self, p: Params, v: bool) -> PluginResult<()> { self.inner.set_bool(p, v) }
+    fn get_bool(&self, p: Params) -> PluginResult<bool> { self.inner.get_bool(p) }
+    fn get_bool_at_time(&self, p: Params, t: TimeType) -> PluginResult<bool> { self.inner.get_bool_at_time(p, t) }
+    fn set_string(&mut self, p: Params, v: &str) -> PluginResult<()> {
+        if p == Params::ProjectPath { Ok(()) } else { self.inner.set_string(p, v) }
+    }
+    fn get_string(&self, p: Params) -> PluginResult<String> {
+        if p == Params::ProjectPath { Ok(self.path.to_string()) } else { self.inner.get_string(p) }
+    }
+    fn set_i32(&mut self, p: Params, v: i32) -> PluginResult<()> { self.inner.set_i32(p, v) }
+    fn get_i32(&self, p: Params) -> PluginResult<i32> { self.inner.get_i32(p) }
+    fn is_keyframed(&self, p: Params) -> bool { self.inner.is_keyframed(p) }
+    fn get_keyframes(&self, p: Params) -> Vec<(TimeType, f64)> { self.inner.get_keyframes(p) }
+    fn clear_keyframes(&mut self, p: Params) -> PluginResult<()> { self.inner.clear_keyframes(p) }
+    fn set_f64_at_time(&mut self, p: Params, t: TimeType, v: f64) -> PluginResult<()> { self.inner.set_f64_at_time(p, t, v) }
 }
 
 #[derive(Default, Clone)]

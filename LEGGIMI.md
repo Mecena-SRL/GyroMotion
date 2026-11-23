@@ -48,6 +48,30 @@ Per una cadenza creativa diversa da quella di timeline, scegli **Look · FPS e s
 
 Applicare Stabilize a una clip con un originale accessibile. Il percorso proviene dalla proprietà della clip fornita da Resolve. Per forzare una nuova lettura usare **Leggi dati clip**. Il codice invalida la vecchia analisi e rilegge i dati dello stesso originale. Se Resolve non espone un file (per esempio alcuni contenitori compositi), il pannello indica il limite. I campi e la precisione dipendono da camera, modalità, firmware e lente. Il catalogo di calibrazione viene incorporato in compilazione. La patch al core elimina la scansione delle cartelle dei profili e il caricamento dei preset predefiniti dell’app Gyroflow. Per il montaggio serve il solo bundle compilato; la build dei sorgenti acquisisce ancora dipendenze e catalogo sulla macchina di sviluppo.
 
+## Database dei metadati per clip (MecenaClipDB)
+
+**mecena-clipdb** estrae da ogni originale giroscopio, accelerometro, orientamento integrato, posa, readout, dimensioni del sensore, focale, zoom, fuoco e diaframma, con lo stesso parser e le stesse calibrazioni di Stabilize. Il binario si trova in **MecenaMotion.ofx.bundle/Contents/Resources/**. Conviene lanciarlo all’ingest, quando le schede sono ancora collegate:
+
+    /Library/OFX/Plugins/MecenaMotion.ofx.bundle/Contents/Resources/mecena-clipdb scan ~/Movies/MecenaClipDB /Volumes/SCHEDA_A
+
+Una seconda scansione rilegge soltanto le clip nuove o modificate; `--force` le rilegge tutte. Ogni clip occupa una cartella **clips/<id>/** con questi file:
+
+| File | Contenuto |
+| --- | --- |
+| `clip.json` | camera, ottica, video, posa e angolo shutter, readout, IMU, sensore in px e mm, intervalli di focale, fuoco, diaframma e zoom |
+| `gyro.gyroflow` | progetto Gyroflow con i dati movimento incorporati, quello che Stabilize carica |
+| `imu.csv` | campioni grezzi di giroscopio (°/s), accelerometro e magnetometro |
+| `orientation.csv` | quaternione integrato nel tempo |
+| `lens.csv` | per ogni campione ottico: focale, fuoco, f/T-stop, zoom, focale in pixel, centro ottico, sensore e pixel pitch |
+| `frames.csv` | tempo e offset di cattura di ogni fotogramma |
+| `metadata.json` | metadati del file senza le serie, compresi i dati specifici della camera |
+
+L’elenco si trova in **index.json**. Il formato è descritto in `vendor/common/src/clipdb.rs`.
+
+Stabilize cerca la clip nel database prima di leggere l’originale. I database consultati sono quelli registrati dalla scansione, quelli indicati da `MECENA_CLIPDB` e una cartella **MecenaClipDB** posta accanto agli originali o fino a cinque livelli sopra. La corrispondenza si cerca prima per percorso, poi per nome e dimensione e infine per nome senza i suffissi dei proxy (`_proxy`, `_prx`…). Due schede con la stessa numerazione si distinguono dalle cartelle in comune. Se nessun criterio basta, il plugin non sceglie. Funziona quindi anche con gli originali offline e con i proxy. **Dati rilevati** riporta «DB Mecena» e il riepilogo della clip.
+
+**Adjustment clip su tutta la timeline.** Copia `Mecena ClipDB.py` (anch’esso in Resources) in `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/`. Con la timeline aperta lancia **Workspace → Scripts → Mecena ClipDB**. Lo script aggiorna il database con gli originali raggiungibili e scrive in **timelines/** la mappa che associa ogni frame di timeline a una clip, al frame sorgente e alla velocità. La mappa diventa quella attiva. Mecena Stabilize su un adjustment clip legge, frame per frame, la clip visibile più in alto e la stabilizza con i suoi dati. Con più adjustment clip li distingue per durata. Dopo ogni modifica al montaggio rilancia lo script. Limiti: le speed ramp a velocità variabile non vengono seguite (la velocità costante sì), e le clip ridimensionate o riposizionate sotto l’adjustment clip ricevono una correzione pensata per il quadro intero. Il caso d’uso previsto è una timeline di proxy o originali a quadro pieno.
+
 ## Uso previsto in Edit e Color
 
 La categoria **Mecena Motion** espone due effetti nello stesso binario OFX. Applicare **Mecena Stabilize** sulla clip e poi **Mecena Shutter**. Questa scelta lascia a Resolve il compito di rendere i fotogrammi adiacenti del primo stadio anche durante lo scrubbing o un render fuori ordine. Si può usare ogni effetto singolarmente. La lettura avviene dall’originale indicato da Resolve oppure, per rileggere dopo un relink, tramite il pulsante «Leggi dati clip» che interroga di nuovo Resolve. Il plugin usa il parser telemetrico di Gyroflow, le calibrazioni integrate e i fotogrammi passati dall’host. Il progetto non installa un’app, un interprete, script di menu o un secondo bundle. Non crea master intermedi. I dati della lente dipendono da camera, modalità e originale; una distanza di fuoco non equivale a una mappa di profondità.
