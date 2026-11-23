@@ -44,6 +44,9 @@ bundle="$target_dir/MecenaMotion.ofx.bundle"
 bin="$bundle/Contents/MacOS/MecenaMotion.ofx"
 mkdir -p "$(dirname "$bin")" "$bundle/Contents/Resources"
 cp "$CARGO_TARGET_DIR/release/libgyroflow_ofx.dylib" "$bin"
+# Clip database extractor and its Resolve script, beside the plugin: the script finds the tool there
+cp "$CARGO_TARGET_DIR/release/mecena-clipdb" "$bundle/Contents/Resources/"
+cp "tools/resolve/Mecena ClipDB.py" "$bundle/Contents/Resources/"
 cp release/Info.plist "$bundle/Contents/"
 cp LICENSE "$bundle/Contents/Resources/GPL-3.txt"
 # Icone degli effetti: OFX le cerca come <identificativo plugin>.png/.svg in Resources.
@@ -56,10 +59,12 @@ for dep in $(otool -L "$bin" | tail -n +2 | awk '{print $1}'); do
 done
 # Con MECENA_APP_SIGN="Developer ID Application: …" il bundle è firmato per la notarizzazione.
 if [[ -n "${MECENA_APP_SIGN:-}" ]]; then
-    codesign --force --options runtime --timestamp --sign "$MECENA_APP_SIGN" "$bundle"
+    sign=(--force --options runtime --timestamp --sign "$MECENA_APP_SIGN")
 else
-    codesign --force --sign - "$bundle"
+    sign=(--force --sign -)
 fi
+codesign "${sign[@]}" "$bundle/Contents/Resources/mecena-clipdb"
+codesign "${sign[@]}" "$bundle"
 codesign --verify --strict "$bundle"
 c++ -std=c++17 -O2 -I SDK tests/bundle.cpp -o "$target_dir/check"
 "$target_dir/check" "$bin"

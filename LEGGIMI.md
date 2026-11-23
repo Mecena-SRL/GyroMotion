@@ -44,11 +44,64 @@ Per una cadenza creativa diversa da quella di timeline, scegli **Look · FPS e s
 
 **MASTER (%)** è il controllo da animare in Edit o Color. A 100 applica la correzione impostata, a 0 azzera la rotazione di stabilizzazione e lo zoom adattivo. Valori intermedi interpolano la rotazione per riga e il campo visivo. La correzione ottica del profilo e l’orientamento del file appartengono alla geometria di base.
 
-**Fluidità massima** imposta quanto smorzare il movimento a MASTER 100. **Crop massimo (zoom %)** imposta il limite richiesto al calcolo adattivo di Gyroflow. A 110% la scala è 1,10× e resta circa il 91% della larghezza. Il limite riguarda lo zoom adattivo e il risultato dipende anche dalla correzione ottica. **Blocco orizzonte (%)** dosa il livellamento. Nel rapporto **Dati rilevati** trovi sorgente telemetrica, dimensioni, fps, conteggi IMU e ottica, prima distanza di fuoco valida e tempo di lettura del sensore quando disponibili. La prima distanza è informativa, non descrive la profondità della scena.
+**Stile** sceglie il comportamento. Ogni nuova istanza parte da **Cinematografico**. Gli stili usano il motore **Percorso ottimale**, che calcola la traiettoria su tutta la clip minimizzando gli strappi del movimento e resta dentro il **Crop massimo**: dove il crop non basta, riduce la fluidità solo in quel tratto.
+
+| Stile | Cosa fa | Valori principali |
+| --- | --- | --- |
+| Micromosso · solo tremolio | Toglie vibrazioni e tremolio della mano, lascia il movimento dell’operatore | τ ≈ 0,06 s su tutti gli assi, crop 108% |
+| Controllato · limita il movimento | Smorza i movimenti bruschi e ampi, con una leggera tendenza a restare fermo | τ ≈ 0,6 s, inerzia 0,5, crop 120% |
+| Cinematografico · attenua i passi | Toglie il rimbalzo dei passi su tilt e rollio, lascia libere le panoramiche | tilt/rollio τ ≈ 0,9 s, pan τ ≈ 0,3 s, crop 125% |
+| Crane / gimbal · fluido su tutti gli assi | Movimento lento e morbido, partenze e arresti dolci, orizzonte in piano, crop fisso senza respiro | tilt/rollio τ ≈ 1,7 s, pan τ ≈ 0,6 s, orizzonte 100%, zoom statico, crop 135% |
+| Personalizzato | Usa le regolazioni avanzate così come sono | — |
+
+τ è la costante di tempo: il filtro lascia passare i movimenti più lenti di circa 1/(2π·τ) Hz. Dopo aver scelto uno stile puoi rifinire **Fluidità** (accetta keyframe), **Crop massimo** e **Blocco orizzonte** senza perdere lo stile. Modificando una regolazione avanzata lo stile diventa **Personalizzato**. Le istanze salvate prima di questa versione si aprono come **Personalizzato** con il motore **Adattivo** e conservano il comportamento precedente.
+
+**Regolazioni avanzate**:
+- **Motore**: Percorso ottimale (più fluido, segue le panoramiche senza ritardo costante) oppure Adattivo (il filtro classico di Gyroflow).
+- **Bilanciamento tilt / pan / rollio (%)**: la fluidità di ciascun asse in percentuale della Fluidità. Il rimbalzo dei passi arriva soprattutto sul tilt.
+- **Tempo di fluidità massimo (s)**: la costante di tempo a Fluidità 100.
+- **Reattività nei movimenti rapidi (s)**: solo Adattivo, evita scatti all’inizio delle panoramiche.
+- **Inerzia** e **Tendenza a restare fermo**: solo Percorso ottimale. La prima addolcisce partenze e arresti, la seconda attenua anche i movimenti lenti intenzionali.
+- **Resta nel crop massimo**: solo Percorso ottimale.
+- **Zoom adattivo** Dinamico o Statico e **Finestra zoom dinamico (s)**: lo statico usa un solo crop per tutta la clip ed elimina il respiro dell’inquadratura.
+
+Limiti: il giroscopio misura solo le rotazioni. La stabilizzazione corregge tilt, pan e rollio; lo spostamento fisico della camera (altezza, passi, avanzamento) resta nell’immagine come traslazione e parallasse. Il rimbalzo dei passi si vede soprattutto come oscillazione del tilt e viene attenuato da lì. Per eliminare anche la traslazione serve una stabilizzazione ottica sull’immagine.
+
+**Crop massimo (zoom %)** imposta il limite richiesto al calcolo adattivo di Gyroflow. A 110% la scala è 1,10× e resta circa il 91% della larghezza. Il limite riguarda lo zoom adattivo e il risultato dipende anche dalla correzione ottica. **Blocco orizzonte (%)** dosa il livellamento. Nel rapporto **Dati rilevati** trovi sorgente telemetrica, dimensioni, fps, conteggi IMU e ottica, prima distanza di fuoco valida e tempo di lettura del sensore quando disponibili. La prima distanza è informativa, non descrive la profondità della scena.
 
 ## Lettura automatica della ripresa
 
 Applicare Stabilize a una clip con un originale accessibile. Il percorso proviene dalla proprietà della clip fornita da Resolve. Per forzare una nuova lettura usare **Leggi dati clip**. Il codice invalida la vecchia analisi e rilegge i dati dello stesso originale. Se Resolve non espone un file (per esempio alcuni contenitori compositi), il pannello indica il limite. I campi e la precisione dipendono da camera, modalità, firmware e lente. Il catalogo di calibrazione viene incorporato in compilazione. La patch al core elimina la scansione delle cartelle dei profili e il caricamento dei preset predefiniti dell’app Gyroflow. Per il montaggio serve il solo bundle compilato; la build dei sorgenti acquisisce ancora dipendenze e catalogo sulla macchina di sviluppo.
+
+## Database dei metadati per clip (MecenaClipDB)
+
+**mecena-clipdb** estrae da ogni originale giroscopio, accelerometro, orientamento integrato, posa, readout, dimensioni del sensore, focale, zoom, fuoco e diaframma, con lo stesso parser e le stesse calibrazioni di Stabilize. Il binario si trova in **MecenaMotion.ofx.bundle/Contents/Resources/**. Conviene lanciarlo all’ingest, quando le schede sono ancora collegate:
+
+    /Library/OFX/Plugins/MecenaMotion.ofx.bundle/Contents/Resources/mecena-clipdb scan ~/Movies/MecenaClipDB /Volumes/SCHEDA_A
+
+Una seconda scansione rilegge soltanto le clip nuove o modificate; `--force` le rilegge tutte. Ogni clip occupa una cartella **clips/<id>/** con questi file:
+
+| File | Contenuto |
+| --- | --- |
+| `clip.json` | camera, ottica, video, posa e angolo shutter, readout, IMU, sensore in px e mm, intervalli di focale, fuoco, diaframma e zoom |
+| `gyro.gyroflow` | progetto Gyroflow con i dati movimento incorporati, quello che Stabilize carica |
+| `imu.csv` | campioni grezzi di giroscopio (°/s), accelerometro e magnetometro |
+| `orientation.csv` | quaternione integrato nel tempo |
+| `lens.csv` | per ogni campione ottico: focale, fuoco, f/T-stop, zoom, focale in pixel, centro ottico, sensore e pixel pitch |
+| `frames.csv` | tempo e offset di cattura di ogni fotogramma |
+| `metadata.json` | metadati del file senza le serie, compresi i dati specifici della camera |
+
+L’elenco si trova in **index.json**. Il formato è descritto in `vendor/common/src/clipdb.rs`.
+
+Stabilize cerca la clip nel database prima di leggere l’originale. I database consultati sono quelli registrati dalla scansione, quelli indicati da `MECENA_CLIPDB` e una cartella **MecenaClipDB** posta accanto agli originali o fino a cinque livelli sopra. La corrispondenza si cerca prima per percorso, poi per nome e dimensione e infine per nome senza i suffissi dei proxy (`_proxy`, `_prx`…). Due schede con la stessa numerazione si distinguono dalle cartelle in comune. Se nessun criterio basta, il plugin non sceglie. Funziona quindi anche con gli originali offline e con i proxy. **Dati rilevati** riporta «DB Mecena» e il riepilogo della clip.
+
+**ProRes RAW e registratori esterni.** Un file di Atomos/Ninja o un intermedio non porta i dati del giroscopio. Li prende dalla clip interna registrata insieme. Importa le clip interne nel Media Pool (anche in un bin a parte) e lancia lo script **Mecena ClipDB**. Lo script abbina ogni file senza dati movimento alla clip interna che ne copre la parte più lunga del timecode, purché ne copra almeno metà. Lo scarto fra i due inizi diventa l’offset in frame. Il timecode deve arrivare al registratore via HDMI/SDI. **Dati rilevati** mostra «dati di C0001.MP4 (collegamento timecode, offset +37 frame)». Per correggere o forzare un abbinamento usa:
+
+    mecena-clipdb link ~/Movies/MecenaClipDB /Volumes/NINJA/RAW_0001.mov /Volumes/SCHEDA_A/C0001.MP4 --offset 37
+
+Un collegamento manuale non viene sovrascritto dallo script. I proxy di Resolve e i file dei registratori non contengono la telemetria: per questo il database resta legato all’originale interno. Il RAW può usare un’area del sensore diversa dall’interno, come il 4.2K RAW e il 4K interno di FX3. Stabilize adatta la geometria per proporzioni, quindi va verificata quando i due formati hanno un crop diverso.
+
+**Adjustment clip su tutta la timeline.** L’installer pkg copia `Mecena ClipDB.py` in `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/` e collega `mecena-clipdb` in `/usr/local/bin`. Con il solo zip copia lo script a mano da Resources. Con la timeline aperta lancia **Workspace → Scripts → Mecena ClipDB**. Lo script aggiorna il database con gli originali raggiungibili e scrive in **timelines/** la mappa che associa ogni frame di timeline a una clip, al frame sorgente e alla velocità. La mappa diventa quella attiva. Mecena Stabilize su un adjustment clip legge, frame per frame, la clip visibile più in alto e la stabilizza con i suoi dati. Con più adjustment clip li distingue per durata. Dopo ogni modifica al montaggio rilancia lo script. Limiti: le speed ramp a velocità variabile non vengono seguite (la velocità costante sì), e le clip ridimensionate o riposizionate sotto l’adjustment clip ricevono una correzione pensata per il quadro intero. Il caso d’uso previsto è una timeline di proxy o originali a quadro pieno.
 
 ## Uso previsto in Edit e Color
 
