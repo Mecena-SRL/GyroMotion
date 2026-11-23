@@ -85,6 +85,99 @@ def item_source_range(item, clip_fps, timeline_fps, duration):
     return start, rate
 
 
+def tc_seconds(tc, fps):
+    """Secondi dalla mezzanotte di un timecode HH:MM:SS:FF (o ;FF drop-frame) come lo mostra Resolve."""
+    m = re.match(r"^(\d+):(\d+):(\d+)[:;.](\d+)$", (tc or "").strip())
+    if not m or fps <= 0:
+        return None
+    h, mi, se, fr = (int(x) for x in m.groups())
+    base = int(round(fps))
+    frames = ((h * 60 + mi) * 60 + se) * base + fr
+    if ";" in tc and base in (30, 60):
+        drop = 2 * base // 30
+        minutes = h * 60 + mi
+        frames -= drop * (minutes - minutes // 10)
+        return frames * 1001.0 / (base * 1000.0)
+    return frames / float(base)
+
+
+def pool_clips(folder):
+    for clip in folder.GetClipList() or []:
+        yield clip
+    for sub in folder.GetSubFolderList() or []:
+        for clip in pool_clips(sub):
+            yield clip
+
+
+def load_index(db):
+    try:
+        with open(os.path.join(db, "index.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_index(db, index):
+    tmp = os.path.join(db, "index.json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(index, f, indent=2)
+    os.replace(tmp, os.path.join(db, "index.json"))
+
+
+def clip_info(clip):
+    path = clip.GetClipProperty("File Path") or ""
+    fps = number(clip.GetClipProperty("FPS"))
+    start = tc_seconds(clip.GetClipProperty("Start TC"), fps)
+    frames = number(clip.GetClipProperty("Frames"))
+    if not path or start is None or fps <= 0 or frames <= 0:
+        return None
+    return {"path": path, "name": os.path.basename(path), "fps": fps, "start": start, "end": start + frames / fps,
+            "tc": clip.GetClipProperty("Start TC")}
+
+
+def link_external_recordings(db, project):
+    """Collega ai dati della clip interna i file senza dati movimento propri (ProRes RAW e altri registratori esterni).
+
+    L'abbinamento usa il timecode: la camera lo manda al registratore via HDMI/SDI. Vince la clip interna che copre la
+    parte più lunga del file esterno, purché ne copra almeno metà. Lo scarto fra i due inizi diventa l'offset in frame.
+    I collegamenti manuali (mecena-clipdb link) restano come sono.
+    """
+    index = load_index(db)
+    if not index:
+        return 0
+    infos = [i for i in (clip_info(c) for c in pool_clips(project.GetMediaPool().GetRootFolder())) if i]
+    by_path = {c["path"]: c for c in index.get("clips", [])}
+    internals = []
+    for info in infos:
+        entry = by_path.get(info["path"])
+        if entry:
+            if info["tc"] and entry.get("start_tc") != info["tc"]:
+                entry["start_tc"] = info["tc"]
+            internals.append((info, entry))
+    links = index.setdefault("links", [])
+    manual = {l["external"] for l in links if l.get("method") == "manuale"}
+    made = 0
+    for ext in infos:
+        if ext["path"] in by_path or ext["path"] in manual:
+            continue
+        best, best_overlap = None, 0.0
+        for info, entry in internals:
+            overlap = min(ext["end"], info["end"]) - max(ext["start"], info["start"])
+            if overlap > best_overlap:
+                best, best_overlap = (info, entry), overlap
+        if not best or best_overlap < 0.5 * (ext["end"] - ext["start"]):
+            continue
+        info, entry = best
+        offset = round((ext["start"] - info["start"]) * info["fps"], 3)
+        links[:] = [l for l in links if l.get("external") != ext["path"]]
+        links.append({"external": ext["path"], "clip_id": entry["id"], "frame_offset": offset, "method": "timecode",
+                      "note": "TC %s su %s" % (ext["tc"], info["tc"])})
+        made += 1
+        print("Collegato %s → %s (offset %+g frame)" % (ext["name"], info["name"], offset))
+    save_index(db, index)
+    return made
+
+
 def main():
     resolve = get_resolve()
     if not resolve:
@@ -121,6 +214,11 @@ def main():
             if path not in media:
                 media.append(path)
 
+    # Anche le clip del Media Pool fuori timeline: le interne registrate insieme a un RAW esterno
+    for clip in pool_clips(project.GetMediaPool().GetRootFolder()):
+        path = clip.GetClipProperty("File Path") or ""
+        if path and path not in media:
+            media.append(path)
     online = [m for m in media if os.path.isfile(m)]
     if online and os.path.isfile(tool):
         print("Aggiorno %s con %d originali…" % (db, len(online)))
@@ -130,6 +228,8 @@ def main():
     offline = len(media) - len(online)
     if offline:
         print("%d originali offline: servono già nel database (scansione delle schede all'ingest)." % offline)
+
+    link_external_recordings(db, project)
 
     name = re.sub(r"[^\w.-]+", "_", "%s__%s" % (project.GetName(), timeline.GetName()))
     out_dir = os.path.join(db, "timelines")

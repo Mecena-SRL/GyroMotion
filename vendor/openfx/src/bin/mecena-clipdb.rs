@@ -4,6 +4,8 @@
 //!
 //!   mecena-clipdb scan <database> <cartella|file>... [--force]
 //!   mecena-clipdb find <database> <file>
+//!   mecena-clipdb link <database> <file esterno> <clip interna|id> [--offset N]
+//!                                                 il RAW di un registratore usa i dati della clip interna
 //!   mecena-clipdb timeline <mappa.json>          rende attiva una mappa di timeline per gli adjustment clip
 //!   mecena-clipdb list
 
@@ -16,7 +18,7 @@ use std::path::{ Path, PathBuf };
 const VIDEO_EXT: &[&str] = &["mp4", "mov", "mxf", "m4v", "insv", "360", "braw", "r3d", "mkv", "avi", "crm"];
 
 fn usage() -> ! {
-    eprintln!("Uso:\n  mecena-clipdb scan <database> <cartella|file>... [--force]\n  mecena-clipdb find <database> <file>\n  mecena-clipdb timeline <mappa.json>\n  mecena-clipdb list");
+    eprintln!("Uso:\n  mecena-clipdb scan <database> <cartella|file>... [--force]\n  mecena-clipdb find <database> <file>\n  mecena-clipdb link <database> <file esterno> <clip interna|id> [--offset N]\n  mecena-clipdb timeline <mappa.json>\n  mecena-clipdb list");
     std::process::exit(2)
 }
 
@@ -31,6 +33,7 @@ fn main() {
                 None => { eprintln!("Nessuna clip per {}", args[2]); 1 }
             }
         }
+        Some("link") if args.len() >= 4 => link(Path::new(&args[1]), &args[2], &args[3], &args[4..]),
         Some("timeline") if args.len() == 2 => {
             let path = std::fs::canonicalize(&args[1]).unwrap_or_else(|_| PathBuf::from(&args[1]));
             match clipdb::TimelineMap::open(&path) {
@@ -53,6 +56,24 @@ fn main() {
         _ => usage(),
     };
     std::process::exit(code);
+}
+
+fn link(root: &Path, external: &str, internal: &str, rest: &[String]) -> i32 {
+    let offset = match rest {
+        [] => 0.0,
+        [flag, v] if flag == "--offset" => match v.parse::<f64>() { Ok(v) => v, Err(_) => usage() },
+        _ => usage(),
+    };
+    let Some(mut db) = ClipDb::open(root) else { eprintln!("Database non valido: {}", root.display()); return 1 };
+    let Some(entry) = db.get(internal).or_else(|| db.find_by_media(internal)).cloned() else {
+        eprintln!("La clip interna non è nel database: esegui prima `scan` sugli originali");
+        return 1
+    };
+    let external = std::fs::canonicalize(external).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| external.to_string());
+    db.set_link(clipdb::Link { external: external.clone(), clip_id: entry.id.clone(), frame_offset: offset, method: "manuale".into(), note: String::new() });
+    if let Err(e) = db.save() { eprintln!("index.json: {e}"); return 1; }
+    println!("{external} → {} (offset {offset:+} frame)", entry.file_name);
+    0
 }
 
 fn collect(path: &Path, out: &mut Vec<PathBuf>) {
@@ -94,7 +115,10 @@ fn scan(root: &Path, inputs: &[String]) -> i32 {
             continue;
         }
         match extract(&db.clip_dir(&id), &file, &id, &fingerprint) {
-            Ok(entry) => {
+            Ok(mut entry) => {
+                if let Some(old) = db.get(&id).or_else(|| db.index.clips.iter().find(|c| c.path == entry.path)) {
+                    entry.start_tc = old.start_tc.clone();
+                }
                 println!("[{}/{}] {name}: {}", n + 1, files.len(), entry.summary);
                 db.upsert(entry);
                 done += 1;
@@ -106,7 +130,7 @@ fn scan(root: &Path, inputs: &[String]) -> i32 {
     }
     if let Err(e) = db.save() { eprintln!("index.json: {e}"); return 1; }
     let _ = clipdb::register_database(root);
-    println!("{done} estratte, {skipped} già aggiornate, {failed} non leggibili · {}", root.display());
+    println!("{done} estratte, {skipped} già aggiornate, {failed} senza dati movimento o illeggibili · {}", root.display());
     if failed > 0 && done + skipped == 0 { 1 } else { 0 }
 }
 
@@ -124,6 +148,13 @@ fn extract(dir: &Path, file: &Path, id: &str, fingerprint: &str) -> Result<Index
         let size = f.size;
         stab.load_video_file(f.get_file(), size, &url, None, true).map_err(|e| format!("{e:?}"))?
     };
+    {
+        let gyro = stab.gyro.read();
+        if gyro.quaternions.is_empty() && gyro.file_metadata.read().raw_imu.is_empty() {
+            // Not indexed: a file without motion data (an external recorder's) takes it from a clip through a link
+            return Err("nessun dato movimento".into());
+        }
+    }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
 
     let project = stab.export_gyroflow_data(gyroflow_core::GyroflowProjectType::WithGyroData, "{}", None).map_err(|e| format!("{e:?}"))?;
@@ -235,7 +266,7 @@ fn extract(dir: &Path, file: &Path, id: &str, fingerprint: &str) -> Result<Index
     Ok(IndexEntry {
         id: id.into(), path: file.to_string_lossy().into(), file_name: file.file_name().unwrap_or_default().to_string_lossy().into(),
         size, fingerprint: fingerprint.into(), fps, frame_count: params.frame_count as u64, width: md.width as u32, height: md.height as u32,
-        has_gyro: !gyro.quaternions.is_empty(), summary: summary.join(" · "),
+        has_gyro: !gyro.quaternions.is_empty(), summary: summary.join(" · "), start_tc: String::new(),
         scanned_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default(),
     })
 }

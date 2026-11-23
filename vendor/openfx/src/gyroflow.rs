@@ -189,6 +189,8 @@ impl Execute for GyroflowPlugin {
                     }
                 }
                 let db_source_frame = instance_data.clip_db.as_ref().and_then(|r| r.source_frame);
+                // A file from an external recorder runs on the motion data of the internal clip recorded with it
+                let db_frame_offset = instance_data.clip_db.as_ref().map(|r| r.frame_offset).filter(|o| *o != 0.0);
 
 
 
@@ -243,6 +245,10 @@ impl Execute for GyroflowPlugin {
                 // The host may tell which source frame it renders (Resolve does, retimed and conformed clips included): the
                 // timestamps are exact then, whatever the frame rates
                 let src_frame = db_source_frame.or_else(|| in_args.get_src_frame().ok().map(|f| f as f64));
+                let src_frame = match db_frame_offset {
+                    Some(offset) => Some(src_frame.unwrap_or(time - time_adj) + offset),
+                    None => src_frame,
+                };
 
                 if !has_gyro {
                     instance_data.plugin.set_status(&mut instance_data.params, "Gyro assente", "In Mecena Shutter apri Avanzate e attiva la stabilizzazione ottica.", false);
@@ -274,7 +280,7 @@ impl Execute for GyroflowPlugin {
                 drop(params);
 
                 // On an adjustment clip the input is the timeline's frame, whatever the clip's own time
-                if source_timestamp_us != timestamp_us && db_source_frame.is_none() {
+                if source_timestamp_us != timestamp_us && db_source_frame.is_none() && db_frame_offset.is_none() {
                     time = (source_timestamp_us as f64 / speed_stretch / 1_000_000.0 * src_fps).round();
                     timestamp_us = ((time / src_fps * 1_000_000.0) * speed_stretch).round() as i64;
                     if (src_fps - fps).abs() > 0.01 {
