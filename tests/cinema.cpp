@@ -147,7 +147,7 @@ int main(int argc,char** argv){
     auto score=evaluate(ref,coverage);
     for(int i=0;i<3;++i){
         auto e=score[i];std::printf("Mixed 50/90 -> 25/180, region %d: %.5f -> %.5f (%d RGB samples)\n",i,e.raw/e.count,e.processed/e.count,e.count);
-        const double limit[]={.50,.75,.80};
+        const double limit[]={.15,.30,.65};
         assert(e.count>250 && e.processed<limit[i]*e.raw);
     }
     // Changing every manual source field must not change a single output pixel.

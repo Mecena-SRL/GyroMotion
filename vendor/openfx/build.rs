@@ -39,7 +39,7 @@ fn main() {
     println!("cargo:rustc-link-search=native={}",out.display());
     println!("cargo:rustc-link-lib=static=mecena_shutter");
     println!("cargo:rustc-link-lib={}",if mac {"c++"} else {"stdc++"});
-    for src in ["src/plugin.cpp","src/motion.hpp","src/optical.hpp","src/camera.hpp","src/exposure.hpp","src/shutter_metal.mm","src/shutter_kernels.inc","SDK"] {
+    for src in ["src/plugin.cpp","src/motion.hpp","src/optical.hpp","src/camera.hpp","src/exposure.hpp","src/shutter_metal.mm","src/blur.hpp","src/blur_core.inc","SDK"] {
         println!("cargo:rerun-if-changed={}",root.join(src).display());
     }
 }
