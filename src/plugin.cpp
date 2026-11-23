@@ -2,6 +2,7 @@
 #include "optical.hpp"
 #include "camera.hpp"
 #include "exposure.hpp"
+#include "blur.hpp"
 #include <memory>
 #include <mutex>
 #include <cstdio>
@@ -10,8 +11,9 @@ extern "C" const char* mecena_source_path_property();
 struct SourceRates { double capture, file, exposureMs; };
 extern "C" SourceRates mecena_source_rates(const char* path);
 #ifdef __APPLE__
+#include "blur.hpp"
 namespace motion {
-bool metalShutter(Image,const Image*,const Image*,Image,const int*,float,int,bool,int=0,const CameraPair* = nullptr);
+bool metalBlur(const blur::Job&,Image,const int*);
 }
 #endif
 using namespace motion;
@@ -342,7 +344,9 @@ Timing timing(OfxImageEffectHandle e,double outputTime){
         if(speed<1e-8)return {center,0,0,1000*targetSeconds};
         existingSeconds/=speed;
     }
-    return {center,clock.render*std::sqrt(std::max(0.,targetSeconds*targetSeconds-existingSeconds*existingSeconds)),1000*existingSeconds,1000*targetSeconds,
+    // A box shutter of length e convolved with an added box of length a spans a+e:
+    // add exactly the missing support so edges get the ramp of the target shutter.
+    return {center,clock.render*std::max(0.,targetSeconds-existingSeconds),1000*existingSeconds,1000*targetSeconds,
             ramp?1.:nativeStep(targetSeconds),
             !ramp && std::abs(sourceRate-hostRate)<.001 && sourceRate>targetAt(center)+.001,1000./hostRate,false};
 }
@@ -421,9 +425,7 @@ void render(OfxImageEffectHandle e,OfxPropertySetHandle args){
     int quality=0,draftRequest=0;
     check(par->paramGetValueAtTime(parameter(e,"previewQuality"),outputTime,&quality));
     const bool draft=quality==0 && prop->propGetInt(args,kOfxImageEffectPropRenderQualityDraft,0,&draftRequest)==kOfxStatOK && draftRequest==1;
-    const int grid=draft?16:8;
-    std::unique_ptr<Field> prev,next;
-    int neighborCount=0,exposureSamples=0;
+    int neighborCount=0;
     bool subframes=false;
     double stepMs=plan.stepMs;
     std::optional<double> observedMs;
@@ -592,63 +594,26 @@ void render(OfxImageEffectHandle e,OfxPropertySetHandle args){
             if(observedMs){
                 double existing=*observedMs/stepMs;
                 enoughExposure=existing>=goal*.99;
-                span=enoughExposure?0.f:float(std::sqrt(std::max(0.,goal*goal-existing*existing)));
+                span=enoughExposure?0.f:float(goal-existing);
             }
-            if(neighborCount==2){
-                // -1 selects enough intermediate samples for each pixel's trajectory.
-                exposureSamples=-1;
-                if(observedMs && *observedMs>0 && !enoughExposure){
-                    double ratio=plan.targetMs/(*observedMs),tiles=std::round(ratio);
-                    if(tiles>=2 && tiles<=(draft?16:64) && std::abs(ratio-tiles)<.025*tiles){
-                        exposureSamples=int(tiles);span=float(goal);
-                    }
-                }
-            }
-        }else if(subframes || (plan.highRateLook && neighbors[0] && neighbors[1])){
-            double ratio=plan.existingMs>0?plan.targetMs/plan.existingMs:0;
-            double tiles=std::round(ratio);
-            if(tiles>=2 && tiles<=(draft?16:64) && std::abs(ratio-tiles)<.0001){
-                span=float(span/std::sqrt(1.-1./(tiles*tiles)));
-                exposureSamples=int(tiles);
-            }else exposureSamples=draft?8:24;
         }
     }
     if(span>0 && neighborCount){
+        blur::Job job;
+        job.center=im;job.prev=neighbors[0]?&images[0]:nullptr;job.next=neighbors[1]?&images[1]:nullptr;
+        job.exposure=span;job.curve=curve;job.draft=draft;job.curved=plan.cinema;job.camera=plan.cinema?camera:nullptr;
 #ifdef __APPLE__
-        if(size_t(im.w)*im.h>=65536 && !fx->abort(e) &&
-           metalShutter(im,neighbors[0]?&images[0]:nullptr,neighbors[1]?&images[1]:nullptr,
-                        dest,win,span,curve,draft,exposureSamples,plan.cinema?camera:nullptr)){record("Metal");return;}
+        if(size_t(im.w)*im.h>=65536 && !fx->abort(e) && metalBlur(job,dest,win)){record("Metal");return;}
 #endif
-        auto pyr=pyramid(im);
-        for(int side=0;side<2;++side){
-            if(!neighbors[side])continue;
-            auto n=images[side];
-            bool identical=true;
-            for(int y=im.y0;y<im.y0+im.h && identical;++y)
-                identical=std::memcmp(im.at(im.x0,y),n.at(n.x0,y),size_t(im.w)*16)==0;
-            auto f=identical ? std::make_unique<Field>(im.w,im.h,grid)
-                             : std::make_unique<Field>(estimate(pyr,pyramid(n),grid,exposureSamples!=0,&camera[side].forward,&camera[side].reverse));
-            if(side==0)prev=std::move(f);else next=std::move(f);
-            if(fx->abort(e))return;
-        }
+        if(!blur::render(job,dest,win,[&]{return fx->abort(e)!=0;}))return;
+        record("CPU");
+        return;
     }
     for(int y=std::max(dest.y0,win[1]);y<std::min(dest.y0+dest.h,win[3]);++y){
-        if(fx->abort(e))return;
         for(int x=std::max(dest.x0,win[0]);x<std::min(dest.x0+dest.w,win[2]);++x){
             auto d=dest.at(x,y);int u=x-im.x0,v=y-im.y0;
             if(u<0||v<0||u>=im.w||v>=im.h){std::fill(d,d+4,0.f);continue;}
-            if(!prev&&!next){std::memcpy(d,im.at(x,y),16);continue;}
-            Vec a{},b{};
-            if(prev)a=plan.cinema?guidedSample(*prev,im,images[0],u,v):prev->sample(u,v);
-            if(next)b=plan.cinema?guidedSample(*next,im,images[1],u,v):next->sample(u,v);
-            if(!prev)a={-b.x,-b.y};
-            if(!next)b={-a.x,-a.y};
-            if(exposureSamples){
-                float length=span*std::max(std::hypot(a.x,a.y),std::hypot(b.x,b.y));
-                int count=exposureSamples>0?exposureSamples:std::clamp(int(std::ceil(2*length)),4,draft?16:192);
-                reconstruct(im,&images[0],&images[1],u,v,a,b,span,count,curve,d,plan.cinema);
-            }
-            else integrate(im,u,v,a,b,span,curve,d,draft?16:(plan.cinema?192:64));
+            std::memcpy(d,im.at(x,y),16);
         }
     }
     record("CPU");
