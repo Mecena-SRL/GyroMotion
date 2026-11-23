@@ -54,7 +54,23 @@ pub struct IndexEntry {
     pub has_gyro: bool,
     /// Riga breve per «Dati rilevati»
     pub summary: String,
+    /// Timecode iniziale come lo legge Resolve, scritto dallo script: serve ad abbinare i file dei registratori esterni
+    pub start_tc: String,
     pub scanned_at: u64,
+}
+
+/// Un file senza dati movimento propri (ProRes RAW da un registratore esterno, un intermedio) che usa quelli di una
+/// clip interna registrata insieme: il suo frame `n` è il frame `n + frame_offset` della clip
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Link {
+    pub external: String,
+    pub clip_id: String,
+    /// In frame della clip interna; positivo se l'esterno parte dopo
+    pub frame_offset: f64,
+    /// `timecode`, `manuale` o `sequenza`
+    pub method: String,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -63,6 +79,7 @@ pub struct Index {
     pub format: String,
     pub version: u32,
     pub clips: Vec<IndexEntry>,
+    pub links: Vec<Link>,
 }
 
 pub struct ClipDb {
@@ -78,11 +95,28 @@ impl ClipDb {
     }
     /// Un database vuoto in `root`, per la prima scansione
     pub fn open_or_create(root: &Path) -> Self {
-        Self::open(root).unwrap_or_else(|| Self { root: root.to_path_buf(), index: Index { format: INDEX_FORMAT.into(), version: VERSION, clips: Vec::new() } })
+        Self::open(root).unwrap_or_else(|| Self { root: root.to_path_buf(), index: Index { format: INDEX_FORMAT.into(), version: VERSION, clips: Vec::new(), links: Vec::new() } })
     }
     pub fn clip_dir(&self, id: &str) -> PathBuf { self.root.join("clips").join(id) }
     pub fn project_path(&self, id: &str) -> PathBuf { self.clip_dir(id).join(PROJECT_FILE) }
     pub fn get(&self, id: &str) -> Option<&IndexEntry> { self.index.clips.iter().find(|c| c.id == id) }
+
+    /// Il collegamento di un file esterno: per percorso, o per nome se uno solo lo porta
+    pub fn find_link(&self, media_path: &str) -> Option<&Link> {
+        let wanted = normalize_path(media_path);
+        if let Some(l) = self.index.links.iter().find(|l| normalize_path(&l.external) == wanted) {
+            return Some(l);
+        }
+        let name = file_name(media_path).to_lowercase();
+        let same: Vec<_> = self.index.links.iter().filter(|l| file_name(&l.external).to_lowercase() == name).collect();
+        (same.len() == 1).then(|| same[0])
+    }
+
+    pub fn set_link(&mut self, link: Link) {
+        let key = normalize_path(&link.external);
+        self.index.links.retain(|l| normalize_path(&l.external) != key);
+        self.index.links.push(link);
+    }
 
     pub fn upsert(&mut self, entry: IndexEntry) {
         self.index.clips.retain(|c| c.id != entry.id && c.path != entry.path);
@@ -349,6 +383,8 @@ pub struct Resolved {
     pub project: String,
     /// Frame dell'originale da rendere (solo dalla mappa di timeline)
     pub source_frame: Option<f64>,
+    /// Da sommare al frame della clip: un file esterno collegato a una clip interna (`Link`)
+    pub frame_offset: f64,
     pub report: String,
 }
 
@@ -382,12 +418,20 @@ fn cached_map(path: &Path) -> Option<Arc<TimelineMap>> {
 }
 
 fn resolve_in(db: &ClipDb, media: &str, clip_id: &str) -> Option<Resolved> {
-    let entry = db.get(clip_id).filter(|_| !clip_id.is_empty()).or_else(|| db.find_by_media(media))?;
+    let found = db.get(clip_id).filter(|_| !clip_id.is_empty()).or_else(|| db.find_by_media(media)).map(|e| (e, None));
+    let (entry, link) = found.or_else(|| {
+        let link = db.find_link(media)?;
+        Some((db.get(&link.clip_id)?, Some(link)))
+    })?;
     let project = db.project_path(&entry.id);
     project.is_file().then(|| Resolved {
         project: project.to_string_lossy().to_string(),
         source_frame: None,
-        report: format!("DB Mecena · {} · {}", entry.file_name, entry.summary),
+        frame_offset: link.map(|l| l.frame_offset).unwrap_or_default(),
+        report: match link {
+            Some(l) => format!("DB Mecena · dati di {} (collegamento {}, offset {:+} frame) · {}", entry.file_name, l.method, l.frame_offset, entry.summary),
+            None => format!("DB Mecena · {} · {}", entry.file_name, entry.summary),
+        },
     })
 }
 
@@ -441,12 +485,29 @@ mod tests {
             entry("a", "/shoot/day1/cardA/C0001.MP4"),
             entry("b", "/shoot/day1/cardB/C0001.MP4"),
             entry("c", "/shoot/day1/cardA/C0002.MP4"),
-        ] } };
+        ], links: Vec::new() } };
         assert_eq!(db.find_by_media("/shoot/day1/cardB/C0001.MP4").unwrap().id, "b");
         assert_eq!(db.find_by_media("/proxy/C0002_proxy.mov").unwrap().id, "c");
         assert_eq!(db.find_by_media("/proxy/cardA/C0001_proxy.mov").unwrap().id, "a");
         // Two cards, nothing to tell them apart
         assert!(db.find_by_media("/proxy/C0001_proxy.mov").is_none());
+    }
+
+    #[test]
+    fn external_recordings_use_the_linked_clip() {
+        let dir = std::env::temp_dir().join(format!("clipdb-link-{}", std::process::id()));
+        let mut db = ClipDb::open_or_create(&dir);
+        db.upsert(entry("int-1", "/cards/A/C0001.MP4"));
+        db.set_link(Link { external: "/ninja/RAW_0001.mov".into(), clip_id: "int-1".into(), frame_offset: 12.0, method: "timecode".into(), ..Default::default() });
+        db.set_link(Link { external: "/ninja/RAW_0001.mov".into(), clip_id: "int-1".into(), frame_offset: 13.0, method: "manuale".into(), ..Default::default() });
+        assert_eq!(db.index.links.len(), 1);
+        let project = db.project_path("int-1");
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+        std::fs::write(&project, "{}").unwrap();
+        let r = resolve_in(&db, "/Volumes/X/RAW_0001.mov", "").unwrap();
+        assert_eq!(r.frame_offset, 13.0);
+        assert!(resolve_in(&db, "/ninja/RAW_0002.mov", "").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
