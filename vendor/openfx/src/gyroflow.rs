@@ -804,7 +804,7 @@ impl Execute for GyroflowPlugin {
                 }
 
                 let mut effect_properties: EffectDescriptor = effect.properties()?;
-                effect_properties.set_grouping("Mecena Motion")?;
+                effect_properties.set_grouping("Log MetaRaw")?;
 
                 effect_properties.set_label("Mecena Stabilize")?;
                 effect_properties.set_short_label("Mecena Stabilize")?;

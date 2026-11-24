@@ -62,7 +62,7 @@ struct Frame{
 void describe(OfxImageEffectHandle e){
     auto p=properties(e);
     check(prop->propSetString(p,kOfxPropLabel,0,"Mecena Shutter"));
-    check(prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"Mecena Motion"));
+    check(prop->propSetString(p,kOfxImageEffectPluginPropGrouping,0,"Log MetaRaw"));
     check(prop->propSetString(p,kOfxImageEffectPropSupportedContexts,0,kOfxImageEffectContextFilter));
     check(prop->propSetString(p,kOfxImageEffectPropSupportedContexts,1,kOfxImageEffectContextGeneral));
     check(prop->propSetString(p,kOfxImageEffectPropSupportedPixelDepths,0,kOfxBitDepthFloat));
